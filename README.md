@@ -1,1 +1,0 @@
-# Pulse_Sukhoverkhaya
