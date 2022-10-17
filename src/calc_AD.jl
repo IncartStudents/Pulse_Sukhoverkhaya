@@ -1,4 +1,5 @@
-using DSP
+
+include("../src/my_filt.jl")
 
 struct Peak
     min_pos::Int64
@@ -35,47 +36,26 @@ struct Params
     pres::Float64
 end
 
-# Функция поиска валидных пиков в ОДНОМ валидном сегменте АД
-# фильтр + детектор + параметризатор
-function CALC_AD(seg_x_1000, Fs)
+# фильтры + детектор + параметризатор для АД
+function calc_ad(seg, Fs)
 
     # Фильтрация
-    fsig_smooth = floor.(Int, SmoothFilt(seg_x_1000, Fs)) # сглаживание
-    fsig = floor.(Int, ConstRemove(fsig_smooth, Fs)) # устранение постоянной составляющей
+    fsig_smooth = my_butter(seg, 2, 10, Fs, "low") # сглаживание
+    fsig = my_butter(fsig_smooth, 2, 0.3, Fs, "high") # устранение постоянной составляющей
 
     # детектор
     pk = pkAD(fsig, fs)
 
     # параметризатор
-    events = paramAD(pk, seg_x_1000, fsig, fs)
+    events = paramAD(pk, seg, fsig, fs)
 
     # отбраковка
-    seg, bad, new_events = discardAD(events, fs)
+    bad = discardAD(events, fs)
 
-    return events, new_events, pk, bad, fsig
+    return events, bad, fsig_smooth, fsig
 end
 
-# Сглаживающий фильтр
-function SmoothFilt(sig, Fs)
-
-    responsetype = Lowpass(10; fs=Fs)
-    designmethod = Butterworth(2)
-    fsig = filt(digitalfilter(responsetype, designmethod), sig)
-
-    return fsig
-end
-
-# Фильтр постоянной составляющей 
-function ConstRemove(sig, Fs)
-
-    responsetype = Highpass(0.3; fs=Fs)
-    designmethod = Butterworth(2)
-    fsig = filt(digitalfilter(responsetype, designmethod), sig)
-
-    return fsig
-end
-
-# тахо
+# тахо для АД
 function diff_filter(sig, fs)
 
     # к-ты
@@ -91,21 +71,20 @@ function diff_filter(sig, fs)
     return filtered
 end
 
-# пиковый детектор с разрядами
-function pkAD(filtered_x_1000, fs)
+# пиковый детектор с разрядами для АД
+function pkAD(filtered, fs)
 
     # тахо
-    tacho = diff_filter(filtered_x_1000, fs);
+    tacho = diff_filter(filtered, fs);
 
     minDist = trunc(0.250 * fs) |> Int
-    mm_lsb = 1000
-    minR = 0.1 * mm_lsb
+    minR = 0.1
 
     N = length(tacho)
 
     LvP = -Inf;       # уровень предыдущего предполагаемого максимума тахо
     LvR = tacho[1];   # уровень слежения-разряда
-    LvZ = 1 * mm_lsb; # средний уровень пика
+    LvZ = 1           # средний уровень пика
     kR = 1/400*(1000/fs);
     kZ = 0.2;
 
@@ -118,8 +97,8 @@ function pkAD(filtered_x_1000, fs)
     lookDn = false        # false - была детекия вниз
 
     lookMn = false
-    mnVal = filtered_x_1000[1]  # значение предполагаемого минимума
-    mnValPrev = filtered_x_1000[1]
+    mnVal = filtered[1]  # значение предполагаемого минимума
+    mnValPrev = filtered[1]
     mnCnt = 1            # счетчик отсчетов после минимума
     mnCntPrev = 1
     mnPrevPos = 1        # позиция предыдущего минимума
@@ -137,8 +116,8 @@ function pkAD(filtered_x_1000, fs)
         # level[i] = LvR
 
         # по фильтрованному сигналу
-        if mnVal >= filtered_x_1000[i] mnVal = filtered_x_1000[i]; mnCnt = 0; end # предполагаемый минимум
-        if mnValPrev >= filtered_x_1000[i] mnValPrev = filtered_x_1000[i]; mnCntPrev = 0; end 
+        if mnVal >= filtered[i] mnVal = filtered[i]; mnCnt = 0; end # предполагаемый минимум
+        if mnValPrev >= filtered[i] mnValPrev = filtered[i]; mnCntPrev = 0; end 
 
         # по тахо
         if modeZero
@@ -162,13 +141,13 @@ function pkAD(filtered_x_1000, fs)
 
                 mxCnt = 0
                 mnCnt = 0
-                mnVal = filtered_x_1000[i]
+                mnVal = filtered[i]
             end
             if lookMn  
                 mnPrevPos = i - mnCntPrev
                 lookMn = false
                 mnCntPrev = 0
-                mnValPrev = filtered_x_1000[i]
+                mnValPrev = filtered[i]
             end
         else # медленный разряд
             LvR = LvR*(1-kR)
@@ -207,6 +186,7 @@ function pkAD(filtered_x_1000, fs)
 end
 
 # ------------------------------------------------------------
+# Параметризация для АД
 function paramAD(pk, raw, filtered, fs)
 
     L = length(pk)
@@ -261,9 +241,8 @@ function paramAD(pk, raw, filtered, fs)
     return events
 end
 
+# Отбраковка для АД
 function discardAD(evt, fs)
-
-    kPres = 1e4
 
     N = length(evt)
     bad = fill(0, N)
@@ -282,12 +261,13 @@ function discardAD(evt, fs)
     for i in 1:N
         s1 = evt[i].Wprev < 0.25*fs || 1.5*fs < evt[i].Wprev # ширина ДО + рефрактерность (хотя рефрактерность была убрана ранее)
         s2 = tfront[i] < 0.080*fs; # || 0.500*Fs < evt.n1 # ширина фронта % ??? искажения на макс ??? 
-        s3 = evt[i].Range < 0.3*kPres || 5*kPres < evt[i].Range # абсолютная амплитуда (размах)
-        s4 = 0.8 < duty[i] || duty[i] < 0.12 # ! .10 коэф. скважности ??? искажения на макс ???
+        # s3 = evt[i].Range < 1 || 50 < evt[i].Range # абсолютная амплитуда (размах)
+        s3 = false
+        s4 = 0.8 < duty[i] || duty[i] < 0.10 # ! .10 коэф. скважности ??? искажения на макс ???
         s5 = kW[i] < 0.5 && (evt[i].Wprev < 0.5*fs) # ??? преждевременный
         s6 = kW[i] > 2 && (evt[i].Wnext > 1*fs) # ??? широкий
-        s7 = evt[i].speed > 10*kPres || evt[i].speed < -10*kPres # скорость накачки в пульсации
-        s8 = evt[i].dSpeed > 2*kPres # ??? широкий
+        s7 = evt[i].speed > 100 || evt[i].speed < -100 # скорость накачки в пульсации
+        s8 = evt[i].dSpeed > 20 # ??? широкий
 
         push!(bs, (s1, s2, s3, s4, s5, s6, s7, s8))
     end
@@ -300,48 +280,15 @@ function discardAD(evt, fs)
         end
     end
 
-    begs = map((x,y) -> if y != 0 x.imn0 end, evt, bad)
-    begs = begs[begs.!=nothing]
+    # begs = map((x,y) -> if y != 0 x.imn0 end, evt, bad)
+    # begs = begs[begs.!=nothing]
 
-    ends = map((x,y) -> if y != 0 x.imn end, evt, bad)
-    ends = ends[ends.!=nothing]
+    # ends = map((x,y) -> if y != 0 x.imn end, evt, bad)
+    # ends = ends[ends.!=nothing]
 
-    seg = map((x,y) -> Seg(x,y), begs, ends)
+    # seg = map((x,y) -> Seg(x,y), begs, ends)
 
-    new_events = map((x,y,z) -> (tfront = x, duty = y, kW = z), tfront, duty, kW)
+    # new_events = map((x,y,z) -> (tfront = x, duty = y, kW = z), tfront, duty, kW)
 
-    return seg, bad, new_events
-end
-
-#-------------------------------------------------------------
-function process_seg(Pres, fs, seg, n)
-
-    s1 = Pres[seg[n,1]:seg[n,2]]
-
-    events, new_events, pk, bad, fsig = CALC_AD(s1.*1000, fs);
-
-    min = map(x -> x.imn, events)
-    max = map(x -> x.imx, events)
-
-    ### Формирование структуры из разметки (НАКАЧКА, И СПУСК)
-    final_upndown = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min, max)
-
-    ### выделение фрагмента стравливания воздуха и отрисовка FP пиков после сравнения
-    presstr = maximum(s1)
-    p = findall(x -> x == presstr, s1)
-    down = map((x,y) -> x>y ? true : false, max, fill(p[1], length(max)))
-    ind = findall(down)
-
-    ### Формирование структуры из разметки (ТОЛЬКО СПУСК)
-    final_down = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min[ind], max[ind])
-
-    ### После параметризации
-    notbad = findall(x -> x==0, bad)
-    ver = max[notbad]
-    down = map((x,y) -> x>y ? true : false, ver, fill(p[1], length(ver)))
-    ind = findall(down)
-
-    paramed_down = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min[notbad][ind], max[notbad][ind])
-
-    return final_down, paramed_down, p
+    return bad
 end

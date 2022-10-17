@@ -1,43 +1,35 @@
-using DSP
+include("../src/my_filt.jl")
 
-function calc_tone(seg_tone, seg_pres, fs)
+struct Edges
+    ins1::Int64
+    ins2::Int64
+    ins3::Int64
+    ins4::Int64
+    ibeg::Int64
+    iend::Int64
+    W::Int64
+    noise::Float64
+    snr::Float64
+end
+
+# фильтры + детектор + параметризатор для Тонов
+function calc_tone(seg_tone, smoothpres, fs)
     # фильтры
-    smoothpres = floor.(SmoothFilt(seg_pres, fs)) # сглаженный давления
-    smoothtone = floor.(smooth_tone(seg_tone, fs)) # сглаженный тонов
-    ftone = floor.(my_highpass(smoothtone, fs)) # фильтрованный тонов
-    fstone = floor.(SmoothFilt(ftone, fs)) # огибающая по модулю
+    smoothtone = my_butter(seg_tone, 2, 60, fs, "low") # сглаженный тонов
+    ftone = my_butter(smoothtone, 2, 30, fs, "high") # фильтрованный тонов
+    fstone = my_butter(ftone, 2, 10, fs, "low") # огибающая по модулю
     # детектор
     pos = pk_tone(fstone, fs)
     # параметризатор
     edg = find_edges(fstone, pos, fs)
     bad = discard_tone(smoothpres, fstone, pos, edg)
 
-    return pos, bad
+    return pos, bad, fstone
 end
 
-# Сглаживающий фильтр
-# Сглаживающий фильтр
-function smooth_tone(sig, Fs)
-
-    responsetype = Lowpass(60; fs=Fs)
-    designmethod = Butterworth(2)
-    fsig = filt(digitalfilter(responsetype, designmethod), sig)
-
-    return fsig
-end
-
-function my_highpass(sig, Fs)
-
-    responsetype = Highpass(30; fs=Fs)
-    designmethod = Butterworth(2)
-    fsig = filt(digitalfilter(responsetype, designmethod), sig)
-
-    return fsig
-end
-
+# детектор пиков для тонов
 function pk_tone(sig, Fs)
 
-    minAmp = 0
     minDist = 0.200*Fs
 
     LvP = -Inf
@@ -46,15 +38,12 @@ function pk_tone(sig, Fs)
     extr = fill(false, N)
 
     minR = 90
-    LvZ = 1000    # средний уровень пика
     LvR = sig[1]  # уровень слежения-разряда
     kR = 1/20/4   # kR = 1/20;
 
     LvN = 100
     kN = 1/100/4 # kN = 1/100;
     kaN = 2.5
-
-    pk = []
 
     for i in 1:N
         err = sig[i] - LvN
@@ -87,18 +76,7 @@ function pk_tone(sig, Fs)
     return pos
 end
 
-struct Edges
-    ins1::Int64
-    ins2::Int64
-    ins3::Int64
-    ins4::Int64
-    ibeg::Int64
-    iend::Int64
-    W::Int64
-    noise::Int64
-    snr::Float64
-end
-
+# параметризатор для тонов
 function find_edges(x, pos, Fs)
     # поиск границ пиков по уровню 0.3
     
@@ -149,11 +127,11 @@ function find_edges(x, pos, Fs)
         
         ibeg = minimum([N, pos[i]+wAfter+1+noiseOffset2]) |> Int64
         iend = minimum([N, ibeg+noiseLen]) |> Int64
-        nsAfter = maximum(x[ibeg:iend]) |> Int64
+        nsAfter = maximum(x[ibeg:iend])
         ins3 = ibeg
         ins4 = iend
         
-        noise = maximum([nsBefore, nsAfter]) |> Int64
+        noise = maximum([nsBefore, nsAfter])
         snr = x[pos[i]]/noise
 
         push!(edg, Edges(ins1, ins2, ins3, ins4, i1, i2,
@@ -163,10 +141,8 @@ function find_edges(x, pos, Fs)
     return edg
 end
 
+# браковка для тонов
 function discard_tone(smoothpres, fstone, pos, edg)
-
-    kPres = 1e4
-    kTone = 1e3
 
     bad = zeros(length(pos))
     pres = smoothpres[pos]
@@ -174,9 +150,9 @@ function discard_tone(smoothpres, fstone, pos, edg)
     badset = Tuple[]
 
     for i in 1:lastindex(edg)
-        s1 = pres[i] < 3*kPres # давление в точке меньше 30 мм
+        s1 = pres[i] < 30  # давление в точке меньше 30 мм
         s2 = edg[i].snr < 3.0 # мин сигнал/шум
-        s3 = fstone[pos[i]] < 0.3*kTone # амплитуда тона
+        s3 = fstone[pos[i]] < 30 # амплитуда тона (0.3 на исходный/1000)
         push!(badset, (s1, s2, s3))
     end
 
@@ -190,22 +166,4 @@ function discard_tone(smoothpres, fstone, pos, edg)
     end
 
     return bad
-end
-
-function process_seg_tone(Tone, Pres, fs, seg, n, p)
-
-    s1 = Tone[seg[n,1]:seg[n,2]]
-    s2 = Pres[seg[n,1]:seg[n,2]]*1000
-
-    pos0, bad = calc_tone(s1, s2, fs)
-    pos = pos0[findall(map((x,y) -> x>y, pos0, fill(p[1], length(pos0))))]
-    final = pos .+ seg[n,1]
-
-    # псоле параметризации
-    notbad = findall(x -> x==0, bad)
-    ver = pos0[notbad]
-    nb = ver[findall(map((x,y) -> x>y, ver, fill(p[1], length(ver))))]
-    paramed = nb .+ seg[n, 1]
-
-    return final, paramed
 end

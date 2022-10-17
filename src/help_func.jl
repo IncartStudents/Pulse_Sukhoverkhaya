@@ -1,6 +1,12 @@
 using DSP
 using Statistics
 
+struct Markup
+    bg::Int64
+    en::Int64
+    amp::Int64
+end
+
 # Поиск границ сегментов (валидных) по набору меток (1 или 0) айдишников отсчетов
 
 # Вход: вектор булевых значений (меток валидности каждого отсчета)
@@ -28,12 +34,6 @@ end
 ##----------------------------------------------------##
 
 # парсинг разметки из файлов
-struct Markup
-    bg::Int64
-    en::Int64
-    amp::Int64
-end
-
 function pls_ton_parse(filename)
 
     markup = Vector{Markup}[]
@@ -144,40 +144,40 @@ function save_markup(markup, filename, ext)
 end
 
 # инициализация состояния фильтра (эмпирический подбор)
-function filterInitState(b, a)
-    # функция эмпирически определяет начальное состояние фильтра
+# function filterInitState(b, a)
+#     # функция эмпирически определяет начальное состояние фильтра
     
-    # возможны два варианта: ВЧ - начинается с нуля, НЧ - начинается с единицы
+#     # возможны два варианта: ВЧ - начинается с нуля, НЧ - начинается с единицы
     
-    # чтобы использовать фильтр, необходимо умножить первый отсчет сигнала
-    # x(1) на его начальные состояния z: 
-    # z = x(1)*z;
+#     # чтобы использовать фильтр, необходимо умножить первый отсчет сигнала
+#     # x(1) на его начальные состояния z: 
+#     # z = x(1)*z;
     
-    x1 = 1; zero = 0;
-    x = ones(1,10);
-    order = length(b)-1;
-    while length(a)-1 < order
-        a = [a; 0];
-    end
-    if a[1] != 1
-        b = b./a[1];
-        a = a./a[1];
-    end
-    z0 = zeros(order, 1);
-    z1 = zeros(order, 1);
-    for k in 1:order # z - суммы в звеньях задержки (Direct Form II Transposed)
-       z0[k] = sum(x1*b[1+k:end]- zero*a[1+k:end]);
-       z1[k] = sum(x1*b[1+k:end]- x1*a[1+k:end]);
-    end
+#     x1 = 1; zero = 0;
+#     x = ones(1,10);
+#     order = length(b)-1;
+#     while length(a)-1 < order
+#         a = [a; 0];
+#     end
+#     if a[1] != 1
+#         b = b./a[1];
+#         a = a./a[1];
+#     end
+#     z0 = zeros(order, 1);
+#     z1 = zeros(order, 1);
+#     for k in 1:order # z - суммы в звеньях задержки (Direct Form II Transposed)
+#        z0[k] = sum(x1*b[1+k:end]- zero*a[1+k:end]);
+#        z1[k] = sum(x1*b[1+k:end]- x1*a[1+k:end]);
+#     end
 
-    y0 = filt(b,a,x,z0);
-    y1 = filt(b,a,x,z1); 
+#     y0 = filt(b,a,x,z0);
+#     y1 = filt(b,a,x,z1); 
 
-    if (1-y1[end]) > y0[end]
-        z = z0; # ВЧ / полосовые фильтры - инициализировать с нуля
-    else
-        z = z1; # НЧ фильтр - инициализировать с единицы * x(1) 
-    end
+#     if (1-y1[end]) > y0[end]
+#         z = z0; # ВЧ / полосовые фильтры - инициализировать с нуля
+#     else
+#         z = z1; # НЧ фильтр - инициализировать с единицы * x(1) 
+#     end
 
-    return z
-end
+#     return z
+# end

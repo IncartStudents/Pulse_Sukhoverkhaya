@@ -24,7 +24,7 @@ function calc_indexpairs(
     stop1 = false
     stop2 = false
     # работаем по алгоритму 
-    while !(stop1 && stop2)
+    while !(stop1 && stop2) && Np <= length(indexpairs)-1
         if t <= T   # найдено раньше эталона
             if i2 < N2
                 t_ = times2[i2 + 1]

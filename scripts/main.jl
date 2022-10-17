@@ -1,97 +1,121 @@
 using Plots
 
 include("../src/readfiles.jl")   # добавление файла с функциями чтения bin- и hdr-файлов
-include("../src/help_func.jl")   # добавление файла со вспомогательными функциями 
-include("../src/calc_AD.jl")     # добавления файла с функциями для работы с АД
-include("../src/calc_tone.jl")   # добавления файла с функциями для работы с тонами
+include("../src/one_seg_calc.jl")
 
-binfile = "D:/INCART/Pulse_Data/bin/PX11321102817293.bin" # обрабатываемый бинарь (там же рядом должен лежать hdr!)
+# nm = "PX11321102817293"
 
-signals, fs, timestart, units = readbin(binfile);
+FILEN = 1
 
-Pres = signals.Pres; # давление
-Tone = signals.Tone; # пульсации
+dir = "D:/INCART/Pulse_Data/bin"
+files = readdir(dir)
+allbins = files[findall(x -> split(x, ".")[end] == "bin", files)]
 
-seg = get_valid_segments(Pres, Tone, 15, -1e7, 30*fs)
+for j in 1:length(allbins)
 
-# ######################################################
-mkp = Vector{Peak}[]
-tonemkp = Vector{Int}[]
+    FILEN = j
 
-pres_paramed = Vector{Peak}[]
-tone_paramed = Vector{Int64}[]
+    nm = split(allbins[FILEN],".")[1]
 
-for i in 1:size(seg)[1]
-    mkpi, paramed_pres, p = process_seg(Pres, fs, seg, i)
-    push!(mkp, mkpi)
-    push!(pres_paramed, paramed_pres)
+    binfile = "D:/INCART/Pulse_Data/bin/"*nm*".bin" # обрабатываемый бинарь (там же рядом должен лежать hdr!)
 
-    pos, paramed_tone = process_seg_tone(Tone, Pres, fs, seg, i, p)
-    push!(tonemkp, pos)
-    push!(tone_paramed, paramed_tone)
-end
+    signals, fs, timestart, units = readbin(binfile);
 
-# Сохранение разметки (только спуск)
-ext = [".pres", ".tone"]
-allmkp = [mkp, tonemkp]
+    Pres = signals.Pres; # давление
+    Tone = signals.Tone; # пульсации
 
-filename = "alg markup/"*split(split(binfile, "/")[end], ".")[end-1]
+    seg = get_valid_segments(Pres, Tone, 15, -1e7, 30*fs)
 
-for i in 1:lastindex(ext)
-    save_markup(allmkp[i], filename, ext[i])
+    # ######################################################
+    mkp = Vector{Peak}[]
+    tonemkp = Vector{Int}[]
+
+    pres_paramed = Vector{Peak}[]
+    tone_paramed = Vector{Int64}[]
+
+    ftone = []
+    fpres = []
+    for i in 1:size(seg)[1]
+        final_pres, paramed_pres, final_tone, paramed_tone, fstone, fad = one_seg_calc(Pres, Tone, fs, seg, i)
+        push!(ftone, fstone)
+        push!(mkp, final_pres)
+        push!(tonemkp, final_tone)
+        push!(pres_paramed, paramed_pres)
+        push!(tone_paramed, paramed_tone)
+        push!(fpres, fad)
+    end
+
+    # Сохранение разметки (после параметризации & только спуск)
+    ext = [".pres", ".tone"]
+    allmkp = [pres_paramed, tone_paramed];
+
+    filename = "alg markup/"*nm
+
+    for i in 1:lastindex(ext)
+        save_markup(allmkp[i], filename, ext[i])
+    end
+
+    # графики 
+    for k in 1:size(seg)[1]
+        p1 = fpres[k]
+        t1 = ftone[k]
+
+        min = map(x -> x.min_pos-seg[k,1]+1, pres_paramed[k])
+        max = map(x -> x.max_pos-seg[k,1]+1, pres_paramed[k])
+
+        plot(p1, fmt = :png, legend = false)
+        scatter!(min, p1[min], markersize = 2)
+        scatter!(max, p1[max], markersize = 2)
+        title!("Pres "*string(k))
+        savefig("figures/"*nm*"_pres_"*string(k)*".png")
+
+        pks = tone_paramed[k] .- seg[k,1] 
+        plot(t1, fmt = :png, legend = false)
+        scatter!(pks, t1[pks], markersize = 2)
+        title!("Tone")
+        savefig("figures/"*nm*"_tone_"*string(k)*".png")
+    end
 end
 
 ###### графики
-p1 = Pres[seg[2,1]:seg[2,2]]
-t1 = Tone[seg[2,1]:seg[2,2]]
 
-plot(p1, fmt = :png, legend = false)
-title!("Pres raw (from alg)")
-savefig("figures/pres_raw_from_alg.png")
+# plot(p1, fmt = :png, legend = false)
+# title!("Pres raw (from alg)")
+# # savefig("figures/pres_raw_from_alg.png")
 
-min = map(x -> x.min_pos-seg[2,1]+1, mkp[2])
-max = map(x -> x.max_pos-seg[2,1]+1, mkp[2])
+# min = map(x -> x.min_pos-seg[2,1]+1, mkp[2])
+# max = map(x -> x.max_pos-seg[2,1]+1, mkp[2])
 
-scatter!(min, p1[min], markersize = 2)
-scatter!(max, p1[max], markersize = 2)
-title!("Alg markup")
-savefig("figures/pres_alg_mkp.png")
+# scatter!(min, p1[min], markersize = 2)
+# scatter!(max, p1[max], markersize = 2)
+# title!("Alg markup")
+# savefig("figures/pres_alg_mkp.png")
 
-plot(t1, fmt = :png, legend = false)
-title!("Tone raw (from alg)")
-savefig("figures/tone_raw_from_alg.png")
+# plot(t1, fmt = :png, legend = false)
+# title!("Tone raw (from alg)")
+# # savefig("figures/tone_raw_from_alg.png")
 
-pks = tonemkp[2] .- seg[2,1] .+ 1
+# pks = tonemkp[2] .- seg[2,1] 
 
-scatter!(pks, t1[pks], markersize = 2)
-title!("Alg markup")
-savefig("figures/tone_alg_mkp.png")
+# scatter!(pks, t1[pks], markersize = 2)
+# title!("Alg markup")
+# # savefig("figures/tone_alg_mkp.png")
 
+# # после параметризации
+# min = map(x -> x.min_pos-seg[2,1]+1, pres_paramed[2])
+# max = map(x -> x.max_pos-seg[2,1]+1, pres_paramed[2])
 
-smoothtone = floor.(smooth_tone(t1, fs)) # сглаженный тонов
-ftone = floor.(my_highpass(smoothtone, fs)) # фильтрованный тонов
-fstone = floor.(SmoothFilt(ftone, fs)) # огибающая по модулю
+# plot(p1, fmt = :png, legend = false)
+# scatter!(min, p1[min], markersize = 2)
+# scatter!(max, p1[max], markersize = 2)
+# title!("Pres")
+# savefig("figures/"*nm*".png")
 
-plot(fstone, fmt = :png, legend = false)
-scatter!(pks, fstone[pks], markersize = 2)
-title!("Alg markup (filtered sig)")
-savefig("figures/tone_alg_mkp_(filt).png")
-
-# после параметризации
-min = map(x -> x.min_pos-seg[2,1]+1, pres_paramed[2])
-max = map(x -> x.max_pos-seg[2,1]+1, pres_paramed[2])
-
-plot(p1, fmt = :png, legend = false)
-scatter!(min, p1[min], markersize = 2)
-scatter!(max, p1[max], markersize = 2)
-title!("After parametrization (alg)")
-savefig("figures/after_parametrization_alg.png")
-
-pks = tone_paramed[2] .- seg[2,1] .+ 1
-plot(t1, fmt = :png, legend = false)
-scatter!(pks, t1[pks], markersize = 2)
-title!("After parametrization (alg)")
-savefig("figures/after_parametrization_alg_tone.png")
+# pks = tone_paramed[2] .- seg[2,1] 
+# plot(t1, fmt = :png, legend = false)
+# scatter!(pks, t1[pks], markersize = 2)
+# title!("Tone")
+# savefig("figures/"*nm*".png")
 
 # ######################################################
 
