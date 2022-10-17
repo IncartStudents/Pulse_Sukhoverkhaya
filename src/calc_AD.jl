@@ -1,21 +1,58 @@
 using DSP
 
+struct Peak
+    min_pos::Int64
+    max_pos::Int64
+end
+
+struct PDtk
+    minmax::Peak
+    updown::Peak
+end
+
+struct Seg
+    bg::Int64
+    en::Int64
+end
+
+struct Params 
+    ipres::Int64
+    imx::Int64
+    imn0::Int64
+    imn::Int64
+    Wprev::Float64
+    Wnext::Float64
+    P1::Float64
+    P2::Float64
+    Amx::Float64
+    Amn::Float64
+    Range2::Float64
+    speed::Float64
+    delta::Float64
+    Range::Float64
+    speedPrev::Float64
+    dSpeed::Float64
+    pres::Float64
+end
+
 # Функция поиска валидных пиков в ОДНОМ валидном сегменте АД
 # фильтр + детектор + параметризатор
+function CALC_AD(seg_x_1000, Fs)
 
-function CALC_AD(seg, Fs)
     # Фильтрация
-    fsig_smooth = SmoothFilt(seg, Fs) # сглаживание
-    fsig_smooth = fsig_smooth .|> round .|> Int64
-
-    fsig = ConstRemove(fsig_smooth, Fs) # устранение постоянной составляющей
-    fsig = fsig*1000 .|> round .|> Int64
+    fsig_smooth = floor.(Int, SmoothFilt(seg_x_1000, Fs)) # сглаживание
+    fsig = floor.(Int, ConstRemove(fsig_smooth, Fs)) # устранение постоянной составляющей
 
     # детектор
     pk = pkAD(fsig, fs)
 
     # параметризатор
-    events = paramAD(pk, seg, fsig, fs)
+    events = paramAD(pk, seg_x_1000, fsig, fs)
+
+    # отбраковка
+    seg, bad, new_events = discardAD(events, fs)
+
+    return events, new_events, pk, bad, fsig
 end
 
 # Сглаживающий фильтр
@@ -54,16 +91,6 @@ function diff_filter(sig, fs)
     return filtered
 end
 
-struct Peak
-    min_pos::Int64
-    max_pos::Int64
-end
-
-struct PDtk
-    minmax::Peak
-    updown::Peak
-end
-
 # пиковый детектор с разрядами
 function pkAD(filtered_x_1000, fs)
 
@@ -92,7 +119,9 @@ function pkAD(filtered_x_1000, fs)
 
     lookMn = false
     mnVal = filtered_x_1000[1]  # значение предполагаемого минимума
+    mnValPrev = filtered_x_1000[1]
     mnCnt = 1            # счетчик отсчетов после минимума
+    mnCntPrev = 1
     mnPrevPos = 1        # позиция предыдущего минимума
 
     modeZero = true
@@ -109,6 +138,7 @@ function pkAD(filtered_x_1000, fs)
 
         # по фильтрованному сигналу
         if mnVal >= filtered_x_1000[i] mnVal = filtered_x_1000[i]; mnCnt = 0; end # предполагаемый минимум
+        if mnValPrev >= filtered_x_1000[i] mnValPrev = filtered_x_1000[i]; mnCntPrev = 0; end 
 
         # по тахо
         if modeZero
@@ -135,10 +165,10 @@ function pkAD(filtered_x_1000, fs)
                 mnVal = filtered_x_1000[i]
             end
             if lookMn  
-                mnPrevPos = i - mnCnt
+                mnPrevPos = i - mnCntPrev
                 lookMn = false
-                mnCnt = 0
-                mnVal = filtered_x_1000[i]
+                mnCntPrev = 0
+                mnValPrev = filtered_x_1000[i]
             end
         else # медленный разряд
             LvR = LvR*(1-kR)
@@ -151,6 +181,9 @@ function pkAD(filtered_x_1000, fs)
                 updown = Peak(pkDn, pkUp)           # пики фильтрованного сигнала
 
                 push!(detections, PDtk(minmax, updown))
+
+                mnCntPrev = mnCnt
+                mnValPrev = mnVal
 
                 lookMn = true
             end
@@ -167,51 +200,13 @@ function pkAD(filtered_x_1000, fs)
         
         mxCnt += 1
         mnCnt += 1
+        mnCntPrev += 1
     end
 
     return detections
 end
 
-# коррекция позиций пиков (компенсация задержки)
-
-# тест пикового детектора 
-# uppos = map(x -> x.updown.max_pos, detections)
-# downpos = map(x -> x.updown.min_pos, detections)
-
-# delay = 5 # компенсация задержки(???????????????)
-
-# correct_up = map(x -> (x-delay) >= 1 ? x-delay : 1, uppos)
-# correct_down = map(x -> (x-delay) >= 1 ? x-delay : 1, downpos)
-
-# plot(filtered)
-
-# scatter!(correct_up, filtered[correct_up], markersize = 2, label = "up")
-# scatter!(correct_down, filtered[correct_down], markersize = 2, label = "down")
-
-# xlims!(5000, 6000)
-# ylims!(-500, 1000)
-
 # ------------------------------------------------------------
-struct Params 
-    ipres::Float64
-    imx::Float64
-    imn0::Float64
-    imn::Float64
-    Wprev::Float64
-    Wnext::Float64
-    P1::Float64
-    P2::Float64
-    Amx::Float64
-    Amn::Float64
-    Range2::Float64
-    speed::Float64
-    delta::Float64
-    Range::Float64
-    speedPrev::Float64
-    dSpeed::Float64
-    pres::Float64
-end
-
 function paramAD(pk, raw, filtered, fs)
 
     L = length(pk)
@@ -266,49 +261,84 @@ function paramAD(pk, raw, filtered, fs)
     return events
 end
 
-struct badset
-    s1::Bool
-    s2::Bool
-    s3::Bool
-    s4::Bool
-    s5::Bool
-    s6::Bool
-    s7::Bool
-    s8::Bool
-end
+function discardAD(evt, fs)
 
-function discardAD(events, fs)
+    kPres = 1e4
 
-    seg = Vector[]
-    kPress = 1e4
-
-    N = length(events)
-    bad = zeros(N, 1)
-    bs = badset[]
+    N = length(evt)
+    bad = fill(0, N)
+    bs = Tuple[]
 
     # время фронта:
-    tfront = map(x -> x.imx - x.ipres, events)
+    tfront = map(x -> x.imx - x.ipres, evt)
 
     # скважность
-    duty = map((x,y) -> x - y.Wnext, (tfront, events))
+    duty = map((x,y) -> x/y.Wnext, tfront, evt)
 
     # отношение интервалов до/после:
-    kW = map(x -> x.Wprev/x.Wnext, events)
+    kW = map(x -> x.Wprev/x.Wnext, evt)
 
     # браковка:
     for i in 1:N
-        s1 = evt[i].Wprev < 0.25*Fs || 1.5*Fs < evt[i].Wprev # ширина ДО + рефрактерность (хотя рефрактерность была убрана ранее)
-        s2 = evt[i].n1 < 0.080*Fs; # || 0.500*Fs < evt.n1 # ширина фронта % ??? искажения на макс ??? 
-        s3 = evt[i].Range < 0.3*kPres || 5*kPres < evt[i].Range # абсолютная амплитуда (размах)
-        s4 = evt[i].duty < 0.12 || 0.8 < evt[i].duty # ! .10 коэф. скважности ??? искажения на макс ???
-        s5 = evt[i].kW < 0.5 && (evt[i].Wprev < 0.5*Fs) # ??? преждевременный
-        s6 = evt[i].kW > 2 && (evt[i].Wnext > 1*Fs) # ??? широкий
+        s1 = evt[i].Wprev < 0.25*fs || 1.5*fs < evt[i].Wprev # ширина ДО + рефрактерность (хотя рефрактерность была убрана ранее)
+        s2 = tfront[i] < 0.080*fs; # || 0.500*Fs < evt.n1 # ширина фронта % ??? искажения на макс ??? 
+        # s3 = evt[i].Range < 0.3*kPres || 5*kPres < evt[i].Range # абсолютная амплитуда (размах)
+        # ?! s3 (заменено для теста)
+        s3 = evt[i].Range < 0.05*kPres
+        # ?! s4 (заменено для теста)
+        s4 = 0.8 < duty[i] #|| duty[i] < 0.12 # ! .10 коэф. скважности ??? искажения на макс ???
+        s5 = kW[i] < 0.5 && (evt[i].Wprev < 0.5*fs) # ??? преждевременный
+        s6 = kW[i] > 2 && (evt[i].Wnext > 1*fs) # ??? широкий
         s7 = evt[i].speed > 10*kPres || evt[i].speed < -10*kPres # скорость накачки в пульсации
         s8 = evt[i].dSpeed > 2*kPres # ??? широкий
 
-        push!(bs, badset(s1, s2, s3, s4, s5, s6, s7, s8))
+        push!(bs, (s1, s2, s3, s4, s5, s6, s7, s8))
     end
 
-    return bs
+    for j in 1:lastindex(bs)
+        for i in lastindex(bs[j]):-1:1
+            if bs[j][i]
+                bad[j] = bad[j] + 2^(i-1)
+            end
+        end
+    end
+
+    begs = map((x,y) -> if y != 0 x.imn0 end, evt, bad)
+    begs = begs[begs.!=nothing]
+
+    ends = map((x,y) -> if y != 0 x.imn end, evt, bad)
+    ends = ends[ends.!=nothing]
+
+    seg = map((x,y) -> Seg(x,y), begs, ends)
+
+    new_events = map((x,y,z) -> (tfront = x, duty = y, kW = z), tfront, duty, kW)
+
+    return seg, bad, new_events
 end
 
+#-------------------------------------------------------------
+function process_seg(Pres, fs, seg, n)
+
+    s1 = Pres[seg[n,1]:seg[n,2]]
+
+    events, new_events, pk, bad, fsig = CALC_AD(s1.*1000, fs);
+
+    min = map(x -> x.imn, events)
+    max = map(x -> x.imx, events)
+    notbad = findall(x -> x==0, bad)
+
+    ### Формирование структуры из разметки (НАКАЧКА, И СПУСК)
+    final_upndown = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min, max)
+
+    ### выделение фрагмента стравливания воздуха и отрисовка FP пиков после сравнения
+    presstr = maximum(s1)
+    p = findall(x -> x == presstr, s1)
+    ver = max[notbad]
+    down = map((x,y) -> x>y ? true : false, ver, fill(p[1], length(ver)))
+    ind = findall(down)
+
+    ### Формирование структуры из разметки (ТОЛЬКО СПУСК)
+    final_down = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min[ind], max[ind])
+
+    return final_down, p
+end
