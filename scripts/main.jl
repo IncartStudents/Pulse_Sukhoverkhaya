@@ -34,6 +34,32 @@ filename = "alg markup/"*split(split(binfile, "/")[end], ".")[end-1]
 for i in 1:lastindex(ext)
     save_markup(allmkp[i], filename, ext[i])
 end
+
+###### графики
+p1 = Pres[seg[2,1]:seg[2,2]]
+t1 = Tone[seg[2,1]:seg[2,2]]
+
+plot(p1, fmt = :png, legend = false)
+title!("Pres raw (from alg)")
+savefig("figures/pres_raw_from_alg.png")
+
+min = map(x -> x.min_pos-seg[2,1]+1, mkp[2])
+max = map(x -> x.max_pos-seg[2,1]+1, mkp[2])
+
+scatter!(min, p1[min], markersize = 2)
+scatter!(max, p1[max], markersize = 2)
+title!("Alg markup")
+savefig("figures/pres_alg_mkp.png")
+
+plot(t1, fmt = :png, legend = false)
+title!("Tone raw (from alg)")
+savefig("figures/tone_raw_from_alg.png")
+
+pks = tonemkp[2] .- seg[2,1] .+ 1
+
+scatter!(pks, t1[pks], markersize = 2)
+title!("Alg markup")
+savefig("figures/tone_alg_mkp.png")
 # ######################################################
 
 ### скаттерограммы признаков

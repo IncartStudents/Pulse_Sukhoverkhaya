@@ -155,9 +155,9 @@ function process_seg_tone(Tone, fs, seg, n, p)
     s1 = Tone[seg[n,1]:seg[n,2]]
 
     pos0 = calc_tone(s1, fs)
-    pos = findall(map((x,y) -> x>y, pos0, fill(p[1], length(pos0))))
+    pos = pos0[findall(map((x,y) -> x>y, pos0, fill(p[1], length(pos0))))]
 
-    res = pos0[pos]
+    final = pos .+ seg[n,1]
 
-    return res
+    return final
 end

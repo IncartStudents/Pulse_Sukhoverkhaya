@@ -32,15 +32,19 @@ presPe = map(x -> x.en-valid_pres_ref[n][1]+1, pres_ref[n][1:end-1])
 tonePb = map(x -> x.bg-valid_tone_ref[n][1]+1, tone_ref[n])
 # tonePe = map(x -> x.en-valid_tone_ref[n][1]+1, tone_ref[n][1:end-1])
 
-plot(segmP*1000)
+plot(segmP*1000, fmt = :png, legend = false)
+title!("Pres raw")
+savefig("figures/pres_raw.png")
+
 scatter!(presPb, segmP[presPb]*1000, markersize = 2)
-scatter!(presPe, segmP[presPe]*1000, markersize = 2, fmt = :png)
-xlims!(4000, 8000)
-ylims!(100000, 120000)
+scatter!(presPe, segmP[presPe]*1000, markersize = 2, fmt = :png, legend = false)
+title!("Pres ref markup")
+savefig("figures/pres_ref_mkp.png")
 
-plot(segmT)
+plot(segmT, fmt = :png, legend = false)
+title!("Tone raw")
+savefig("figures/tone_raw.png")
+
 scatter!(tonePb, segmT[tonePb], markersize = 2, fmt = :png)
-# scatter!(tonePe, segmT[tonePe], markersize = 2)
-xlims!(4000, 6000)
-
-savefig("tone_auto_markup.png")
+title!("Tone ref markup")
+savefig("figures/tone_ref_markup.png")

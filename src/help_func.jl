@@ -59,9 +59,9 @@ function pls_ton_parse(filename)
                     vl = map(x -> parse(Int, x), values)
                     if length(vl) == 3
                         push!(one_valid_markup, Markup(vl[1], vl[2], vl[3]))
-                    elseif length(v1) == 2
+                    elseif length(vl) == 2
                         push!(one_valid_markup, Markup(vl[1], vl[2], 0))
-                    elseif length(v1) == 1
+                    elseif length(vl) == 1
                         push!(one_valid_markup, Markup(vl[1], 0, 0))
                     end
                 end

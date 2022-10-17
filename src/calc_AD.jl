@@ -325,7 +325,7 @@ function process_seg(Pres, fs, seg, n)
 
     min = map(x -> x.imn, events)
     max = map(x -> x.imx, events)
-    notbad = findall(x -> x==0, bad)
+    # notbad = findall(x -> x==0, bad)
 
     ### Формирование структуры из разметки (НАКАЧКА, И СПУСК)
     final_upndown = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min, max)
@@ -333,7 +333,8 @@ function process_seg(Pres, fs, seg, n)
     ### выделение фрагмента стравливания воздуха и отрисовка FP пиков после сравнения
     presstr = maximum(s1)
     p = findall(x -> x == presstr, s1)
-    ver = max[notbad]
+    # ver = max[notbad]
+    ver = max
     down = map((x,y) -> x>y ? true : false, ver, fill(p[1], length(ver)))
     ind = findall(down)
 
