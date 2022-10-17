@@ -282,11 +282,8 @@ function discardAD(evt, fs)
     for i in 1:N
         s1 = evt[i].Wprev < 0.25*fs || 1.5*fs < evt[i].Wprev # ширина ДО + рефрактерность (хотя рефрактерность была убрана ранее)
         s2 = tfront[i] < 0.080*fs; # || 0.500*Fs < evt.n1 # ширина фронта % ??? искажения на макс ??? 
-        # s3 = evt[i].Range < 0.3*kPres || 5*kPres < evt[i].Range # абсолютная амплитуда (размах)
-        # ?! s3 (заменено для теста)
-        s3 = evt[i].Range < 0.05*kPres
-        # ?! s4 (заменено для теста)
-        s4 = 0.8 < duty[i] #|| duty[i] < 0.12 # ! .10 коэф. скважности ??? искажения на макс ???
+        s3 = evt[i].Range < 0.3*kPres || 5*kPres < evt[i].Range # абсолютная амплитуда (размах)
+        s4 = 0.8 < duty[i] || duty[i] < 0.12 # ! .10 коэф. скважности ??? искажения на макс ???
         s5 = kW[i] < 0.5 && (evt[i].Wprev < 0.5*fs) # ??? преждевременный
         s6 = kW[i] > 2 && (evt[i].Wnext > 1*fs) # ??? широкий
         s7 = evt[i].speed > 10*kPres || evt[i].speed < -10*kPres # скорость накачки в пульсации
@@ -325,7 +322,6 @@ function process_seg(Pres, fs, seg, n)
 
     min = map(x -> x.imn, events)
     max = map(x -> x.imx, events)
-    # notbad = findall(x -> x==0, bad)
 
     ### Формирование структуры из разметки (НАКАЧКА, И СПУСК)
     final_upndown = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min, max)
@@ -333,13 +329,19 @@ function process_seg(Pres, fs, seg, n)
     ### выделение фрагмента стравливания воздуха и отрисовка FP пиков после сравнения
     presstr = maximum(s1)
     p = findall(x -> x == presstr, s1)
-    # ver = max[notbad]
-    ver = max
-    down = map((x,y) -> x>y ? true : false, ver, fill(p[1], length(ver)))
+    down = map((x,y) -> x>y ? true : false, max, fill(p[1], length(max)))
     ind = findall(down)
 
     ### Формирование структуры из разметки (ТОЛЬКО СПУСК)
     final_down = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min[ind], max[ind])
 
-    return final_down, p
+    ### После параметризации
+    notbad = findall(x -> x==0, bad)
+    ver = max[notbad]
+    down = map((x,y) -> x>y ? true : false, ver, fill(p[1], length(ver)))
+    ind = findall(down)
+
+    paramed_down = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min[notbad][ind], max[notbad][ind])
+
+    return final_down, paramed_down, p
 end

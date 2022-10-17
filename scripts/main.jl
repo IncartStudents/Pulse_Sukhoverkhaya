@@ -17,12 +17,18 @@ seg = get_valid_segments(Pres, Tone, 15, -1e7, 30*fs)
 # ######################################################
 mkp = Vector{Peak}[]
 tonemkp = Vector{Int}[]
-for i in 1:size(seg)[1]
-    mkpi, p = process_seg(Pres, fs, seg, i)
-    push!(mkp, mkpi)
 
-    pos = process_seg_tone(Tone, fs, seg, i, p)
+pres_paramed = Vector{Peak}[]
+tone_paramed = Vector{Int64}[]
+
+for i in 1:size(seg)[1]
+    mkpi, paramed_pres, p = process_seg(Pres, fs, seg, i)
+    push!(mkp, mkpi)
+    push!(pres_paramed, paramed_pres)
+
+    pos, paramed_tone = process_seg_tone(Tone, Pres, fs, seg, i, p)
     push!(tonemkp, pos)
+    push!(tone_paramed, paramed_tone)
 end
 
 # Сохранение разметки (только спуск)
@@ -70,6 +76,23 @@ plot(fstone, fmt = :png, legend = false)
 scatter!(pks, fstone[pks], markersize = 2)
 title!("Alg markup (filtered sig)")
 savefig("figures/tone_alg_mkp_(filt).png")
+
+# после параметризации
+min = map(x -> x.min_pos-seg[2,1]+1, pres_paramed[2])
+max = map(x -> x.max_pos-seg[2,1]+1, pres_paramed[2])
+
+plot(p1, fmt = :png, legend = false)
+scatter!(min, p1[min], markersize = 2)
+scatter!(max, p1[max], markersize = 2)
+title!("After parametrization (alg)")
+savefig("figures/after_parametrization_alg.png")
+
+pks = tone_paramed[2] .- seg[2,1] .+ 1
+plot(t1, fmt = :png, legend = false)
+scatter!(pks, t1[pks], markersize = 2)
+title!("After parametrization (alg)")
+savefig("figures/after_parametrization_alg_tone.png")
+
 # ######################################################
 
 ### скаттерограммы признаков

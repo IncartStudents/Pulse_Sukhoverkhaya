@@ -1,16 +1,18 @@
 using DSP
 
-function calc_tone(seg_tone, fs)
+function calc_tone(seg_tone, seg_pres, fs)
     # фильтры
-    # smoothpress = floor.(SmoothFilt(seg_pres, fs)) # сглаженный давления
+    smoothpres = floor.(SmoothFilt(seg_pres, fs)) # сглаженный давления
     smoothtone = floor.(smooth_tone(seg_tone, fs)) # сглаженный тонов
     ftone = floor.(my_highpass(smoothtone, fs)) # фильтрованный тонов
     fstone = floor.(SmoothFilt(ftone, fs)) # огибающая по модулю
     # детектор
     pos = pk_tone(fstone, fs)
     # параметризатор
+    edg = find_edges(fstone, pos, fs)
+    bad = discard_tone(smoothpres, fstone, pos, edg)
 
-    return pos
+    return pos, bad
 end
 
 # Сглаживающий фильтр
@@ -85,6 +87,18 @@ function pk_tone(sig, Fs)
     return pos
 end
 
+struct Edges
+    ins1::Int64
+    ins2::Int64
+    ins3::Int64
+    ins4::Int64
+    ibeg::Int64
+    iend::Int64
+    W::Int64
+    noise::Int64
+    snr::Float64
+end
+
 function find_edges(x, pos, Fs)
     # поиск границ пиков по уровню 0.3
     
@@ -98,66 +112,100 @@ function find_edges(x, pos, Fs)
 
     Acoef = 1/3
     val = x[pos]
-    
-    W = zeros(size(pos))
-    noise = W
-    i1 = W
-    i2 = W
-    
-    ins1 = W; ins2 = W; ins3 = W; ins4 = W;
+
+    edg = Edges[]
     
     for i=1:Np
         
-        Lvl = floor.(val(i)*Acoef);
+        Lvl = floor.(val[i]*Acoef)
     
         # поиск ширины
-        wBefore = 0;
-        ibeg = pos[i];
-        iend = maximum(ibeg-Wmax, 1);
+        wBefore = 0
+        ibeg = pos[i] |> Int64
+        iend = maximum([ibeg-Wmax, 1]) |> Int64
         for k in ibeg:-1:iend
             if x[k] < Lvl break end
-            wBefore += 1;
+            wBefore += 1
         end
-        i1[i] = ibeg-wBefore;
+        i1 = ibeg-wBefore
         
-        wAfter = 0;
-        ibeg = pos[i];
-        iend = minimum(pos[i]+Wmax, N);
+        wAfter = 0
+        ibeg = pos[i] |> Int64
+        iend = minimum([pos[i]+Wmax, N]) |> Int64
         for k in ibeg : iend
             if x[k] < Lvl break end
-            wAfter += 1;
+            wAfter += 1
         end
-        i2[i] = ibeg+wAfter;
+        i2 = ibeg+wAfter
         
-        W[i] = wBefore + wAfter;
+        W = wBefore + wAfter
         
         # поиск уровня шума
-        ibeg = maximum([1, pos[i]-wBefore-1-noiseOffset1]);
-        iend = maximum([1, ibeg-noiseLen]);
-        nsBefore = maximum(x[iend:ibeg]);
-        ins1[i] = iend;
-        ins2[i] = ibeg;
+        ibeg = maximum([1, pos[i]-wBefore-1-noiseOffset1]) |> Int64
+        iend = maximum([1, ibeg-noiseLen]) |> Int64
+        nsBefore = maximum(x[iend:ibeg])
+        ins1 = iend
+        ins2 = ibeg
         
-        ibeg = minimum([N, pos[i]+wAfter+1+noiseOffset2]);
-        iend = minimum([N, ibeg+noiseLen]);
-        nsAfter = maximum(x[ibeg:iend]);
-        ins3[i] = ibeg;
-        ins4[i] = iend;
+        ibeg = minimum([N, pos[i]+wAfter+1+noiseOffset2]) |> Int64
+        iend = minimum([N, ibeg+noiseLen]) |> Int64
+        nsAfter = maximum(x[ibeg:iend]) |> Int64
+        ins3 = ibeg
+        ins4 = iend
         
-        noise[i] = maximum([nsBefore, nsAfter]);
+        noise = maximum([nsBefore, nsAfter]) |> Int64
+        snr = x[pos[i]]/noise
+
+        push!(edg, Edges(ins1, ins2, ins3, ins4, i1, i2,
+                        W, noise, snr))
     end
         
-    return pk
+    return edg
 end
 
-function process_seg_tone(Tone, fs, seg, n, p)
+function discard_tone(smoothpres, fstone, pos, edg)
+
+    kPres = 1e4
+    kTone = 1e3
+
+    bad = zeros(length(pos))
+    pres = smoothpres[pos]
+
+    badset = Tuple[]
+
+    for i in 1:lastindex(edg)
+        s1 = pres[i] < 3*kPres # давление в точке меньше 30 мм
+        s2 = edg[i].snr < 3.0 # мин сигнал/шум
+        s3 = fstone[pos[i]] < 0.3*kTone # амплитуда тона
+        push!(badset, (s1, s2, s3))
+    end
+
+    # браковка
+    for i in 1:lastindex(bad)
+        for j in 1:lastindex(badset[1])
+            if badset[i][j]
+                bad[i] = j
+            end
+        end
+    end
+
+    return bad
+end
+
+function process_seg_tone(Tone, Pres, fs, seg, n, p)
 
     s1 = Tone[seg[n,1]:seg[n,2]]
+    s2 = Pres[seg[n,1]:seg[n,2]]*1000
 
-    pos0 = calc_tone(s1, fs)
+    pos0, bad = calc_tone(s1, s2, fs)
     pos = pos0[findall(map((x,y) -> x>y, pos0, fill(p[1], length(pos0))))]
-
     final = pos .+ seg[n,1]
 
-    return final
+    # псоле параметризации
+    notbad = findall(x -> x==0, bad)
+    ver = pos0[notbad]
+    nb = ver[findall(map((x,y) -> x>y, ver, fill(p[1], length(ver))))]
+    paramed = nb .+ seg[n, 1]
+
+    return final, paramed
 end
