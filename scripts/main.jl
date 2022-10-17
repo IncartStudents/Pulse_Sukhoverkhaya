@@ -60,6 +60,16 @@ pks = tonemkp[2] .- seg[2,1] .+ 1
 scatter!(pks, t1[pks], markersize = 2)
 title!("Alg markup")
 savefig("figures/tone_alg_mkp.png")
+
+
+smoothtone = floor.(smooth_tone(t1, fs)) # сглаженный тонов
+ftone = floor.(my_highpass(smoothtone, fs)) # фильтрованный тонов
+fstone = floor.(SmoothFilt(ftone, fs)) # огибающая по модулю
+
+plot(fstone, fmt = :png, legend = false)
+scatter!(pks, fstone[pks], markersize = 2)
+title!("Alg markup (filtered sig)")
+savefig("figures/tone_alg_mkp_(filt).png")
 # ######################################################
 
 ### скаттерограммы признаков
