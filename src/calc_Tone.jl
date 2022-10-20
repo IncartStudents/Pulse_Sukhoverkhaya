@@ -17,7 +17,7 @@ function calc_tone(seg_tone, smoothpres, fs)
     # фильтры
     smoothtone = my_butter(seg_tone, 2, 60, fs, "low") # сглаженный тонов
     ftone = my_butter(smoothtone, 2, 30, fs, "high") # фильтрованный тонов
-    fstone = my_butter(ftone, 2, 10, fs, "low") # огибающая по модулю
+    fstone = my_butter(abs.(ftone), 2, 10, fs, "low") # огибающая по модулю
     # детектор
     pos = pk_tone(fstone, fs)
     # параметризатор
@@ -144,7 +144,7 @@ end
 # браковка для тонов
 function discard_tone(smoothpres, fstone, pos, edg)
 
-    bad = zeros(length(pos))
+    bad = fill(0, length(pos))
     pres = smoothpres[pos]
 
     badset = Tuple[]
@@ -160,7 +160,7 @@ function discard_tone(smoothpres, fstone, pos, edg)
     for i in 1:lastindex(bad)
         for j in 1:lastindex(badset[1])
             if badset[i][j]
-                bad[i] = j
+                bad[i] = bad[i]+2^j
             end
         end
     end

@@ -37,11 +37,11 @@ struct Params
 end
 
 # фильтры + детектор + параметризатор для АД
-function calc_ad(seg, Fs)
+function calc_ad(seg, fs)
 
     # Фильтрация
-    fsig_smooth = my_butter(seg, 2, 10, Fs, "low") # сглаживание
-    fsig = my_butter(fsig_smooth, 2, 0.3, Fs, "high") # устранение постоянной составляющей
+    fsig_smooth = my_butter(seg, 2, 10, fs, "low") # сглаживание
+    fsig = my_butter(fsig_smooth, 2, 0.3, fs, "high") # устранение постоянной составляющей
 
     # детектор
     pk = pkAD(fsig, fs)
@@ -261,8 +261,7 @@ function discardAD(evt, fs)
     for i in 1:N
         s1 = evt[i].Wprev < 0.25*fs || 1.5*fs < evt[i].Wprev # ширина ДО + рефрактерность (хотя рефрактерность была убрана ранее)
         s2 = tfront[i] < 0.080*fs; # || 0.500*Fs < evt.n1 # ширина фронта % ??? искажения на макс ??? 
-        # s3 = evt[i].Range < 1 || 50 < evt[i].Range # абсолютная амплитуда (размах)
-        s3 = false
+        s3 = evt[i].Range < 1 || 50 < evt[i].Range # абсолютная амплитуда (размах)
         s4 = 0.8 < duty[i] || duty[i] < 0.10 # ! .10 коэф. скважности ??? искажения на макс ???
         s5 = kW[i] < 0.5 && (evt[i].Wprev < 0.5*fs) # ??? преждевременный
         s6 = kW[i] > 2 && (evt[i].Wnext > 1*fs) # ??? широкий

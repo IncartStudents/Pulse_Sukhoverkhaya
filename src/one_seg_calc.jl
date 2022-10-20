@@ -6,46 +6,22 @@ include("../src/help_func.jl")   # вспомогательные функции
 function one_seg_calc(Pres, Tone, fs, seg, n)
 
     # выделение сегмента
-    pres = Pres[seg[n,1]:seg[n,2]]
-    tone = Tone[seg[n,1]:seg[n,2]]
+    pres = Pres[seg[n].ibeg:seg[n].iend]
+    tone = Tone[seg[n].ibeg:seg[n].iend]
 
-    # обработка АД
-    events_pres, bad_ad, ad_smooth, fad = calc_ad(pres, fs)
-    # обработка тонов
-    pos_tone, bad_tone, fstone = calc_tone(tone, ad_smooth, fs)
+    # Обработка АД
+    events_pres, bad_ad, ad_smooth = calc_ad(pres, fs)
 
-    # момент начала стравливания воздуха
-    presstr = maximum(pres)              # амплитуда вершины треугольника давления
-    p = findall(x -> x == presstr, pres) # позиция вершины треугольника давления
+    # РАЗМЕТКА АД
+    # сборка в вектор структур
+    final_pres = map((x,y) -> PresEv(x.imx.+seg[n].ibeg, x.imn.+seg[n].ibeg, y), events_pres, bad_ad)
 
-    # 1.1. РАЗМЕТКА АД ДО ПАРАМЕТРИЗАЦИИ (ТОЛЬКО СПУСК)
-    min = map(x -> x.imn, events_pres)
-    max = map(x -> x.imx, events_pres)
+    # Обработка тонов
+    pos_tone, bad_tone = calc_tone(tone, ad_smooth, fs)
 
-    # выбор меток правее вершины треугольника давления (спуск)
-    down_pres = map((x,y) -> x>y ? true : false, max, fill(p[1], length(max)))
-    ind_pres = findall(down_pres)
+    # РАЗМЕТКА ТОНОВ
+    # сборка в вектор структур
+    final_tone = map((x,y) -> ToneEv(x, y), pos_tone.+seg[n].ibeg, bad_tone)
 
-    # запись разметки в структуру
-    final_pres = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min[ind_pres], max[ind_pres])
-
-    # 1.1. РАЗМЕТКА ТОНОВ ДО ПАРАМЕТРИЗАЦИИ (ТОЛЬКО СПУСК)
-    pos_fin = pos_tone[findall(map((x,y) -> x>y, pos_tone, fill(p[1], length(pos_tone))))]
-    final_tone = pos_fin .+ seg[n,1]
-
-    # 2.1 РАЗМЕТКА АД ПОСЛЕ ПАРАМЕТРИЗАЦИИ
-    notbad = findall(x -> x==0, bad_ad)
-    ver = max[notbad]
-    down = map((x,y) -> x>y ? true : false, ver, fill(p[1], length(ver)))
-    ind = findall(down)
-
-    paramed_pres = map((x,y) -> Peak(x+seg[n,1], y+seg[n,1]), min[notbad][ind], max[notbad][ind])
-
-    # 2.1 РАЗМЕТКА ТОНОВ ПОСЛЕ ПАРАМЕТРИЗАЦИИ
-    notbad = findall(x -> x==0, bad_tone)
-    ver = pos_tone[notbad]
-    nb = ver[findall(map((x,y) -> x>y, ver, fill(p[1], length(ver))))]
-    paramed_tone = nb .+ seg[n, 1]
-
-    return final_pres, paramed_pres, final_tone, paramed_tone, fstone, fad
+    return final_pres, final_tone
 end
