@@ -160,7 +160,7 @@ function discard_tone(smoothpres, fstone, pos, edg)
     for i in 1:lastindex(bad)
         for j in 1:lastindex(badset[1])
             if badset[i][j]
-                bad[i] = bad[i]+2^j
+                bad[i] = bad[i]+2^(j-1)
             end
         end
     end
