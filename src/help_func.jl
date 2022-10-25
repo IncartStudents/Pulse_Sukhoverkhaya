@@ -171,6 +171,19 @@ function my_bitand(a::Int, b::Int)
     return res
 end
 
+# получение по одному коду браковки кодов составляющих его причин
+function errorcode(error, max_reasons_number)
+    reasons = fill(false, max_reasons_number+1)
+    # на всякий случай проверяем до max_reasons_number а не max_reasons_number - 1
+    for i in 0:max_reasons_number
+        reasons[i+1] = my_bitand(error, 2^i) != 0
+    end
+
+    reasons = findall(reasons).-1
+
+    return reasons
+end
+
 # получение валидных сегментов
 function get_valid_segments(Pres, Tone, pres_min_amp, tone_min_amp, min_seg_len)
     ivalid = fill(false, length(Pres))

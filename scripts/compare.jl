@@ -4,9 +4,6 @@ include("../src/help_func.jl")   # добавление файла со вспо
 include("../src/readfiles.jl") 
 
 
-# nm = "PX11321102817293"
-# FILEN = 8
-
 dir = "D:/INCART/Pulse_Data/bin"
 files = readdir(dir)
 allbins = files[findall(x -> split(x, ".")[end] == "bin", files)]

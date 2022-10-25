@@ -9,14 +9,25 @@ include("../src/my_filt.jl")
 struct Stats
     filename::String # имя файла
     meas::Int64      # номер измерения
+    TP::Int64
+    FP::Int64
+    FN::Int64
     Se::Float64
     PVP::Float64
+end
+
+struct FNCauses
+    filename::String # имя файла
+    meas::Int64      # номер измерения
+    FN::Int64
+    causes::Vector{Int}
 end
 
 function figures_n_stats(allbins, sigtype)
     if sigtype != "tone" && sigtype != "pres" return "Invalid signal type!" end
 
     statistics = fill(Stats[], lastindex(allbins))
+    causesstat = fill(FNCauses[], lastindex(allbins))
 
     for FILEN in 1:lastindex(allbins)
 
@@ -42,23 +53,28 @@ function figures_n_stats(allbins, sigtype)
         # Se = fill(0.0, lastindex(outcomp))
         # PVP = fill(0.0, lastindex(outcomp))
 
-        statistics[FILEN] = fill(Stats("", 0, 0.0, 0.0), length(outcomp))
+        statistics[FILEN] = fill(Stats("", 0, 0, 0, 0, 0.0, 0.0), length(outcomp))
+        causesstat[FILEN] = fill(FNCauses("", 0, 0, Int[]), length(outcomp))
 
         for h in 1:lastindex(outcomp)
-            # позиции реф разметки 
-            ref_pos = map(x -> x.iref != -1 ? x.iref : NaN, outcomp[h])
-            ref_pos = ref_pos[findall(x -> !isnan(x), ref_pos)]
+            # # позиции реф разметки 
+            # ref_pos = map(x -> x.iref != -1 ? x.iref : NaN, outcomp[h])
+            # ref_pos = ref_pos[findall(x -> !isnan(x), ref_pos)]
 
-            # позиции тест разметки (без отбракованных)
-            test_pos = map(x -> x.itest != -1 && x.bad == 0 ? x.itest : NaN , outcomp[h])
-            test_pos = test_pos[findall(x -> !isnan(x), test_pos)]
+            # # позиции тест разметки (без отбракованных)
+            # test_pos = map(x -> x.itest != -1 && x.bad == 0 ? x.itest : NaN , outcomp[h])
+            # test_pos = test_pos[findall(x -> !isnan(x), test_pos)]
+
+            # TP позиции
+            TPpos = map(x -> x.code == "ee" ? x.itest : NaN, outcomp[h])
+            TPpos = TPpos[findall(x -> !isnan(x), TPpos)]
 
             # FP позиции
             FPpos = map(x -> x.code == "oe" ? x.itest : NaN, outcomp[h])
             FPpos = FPpos[findall(x -> !isnan(x), FPpos)]
 
             # FN позиции
-            FNpos = map(x -> x.code == "eo" || x.code == "eb" ? x.iref : NaN, outcomp[h])
+            FNpos = map(x -> if x.code == "eo" x.iref elseif x.code == "eb" x.itest else NaN end, outcomp[h])
             FNpos = FNpos[findall(x -> !isnan(x), FNpos)]
 
             # Забракованные
@@ -88,7 +104,16 @@ function figures_n_stats(allbins, sigtype)
 
             Se = round((TP/(TP+FN))*100, digits=2)
             PVP = round((TP/(TP+FP))*100, digits=2)
-            statistics[FILEN][h] = Stats(nm, h, Se, PVP)
+            statistics[FILEN][h] = Stats(nm, h, TP, FP, FN, Se, PVP)
+
+            # поиск причины или набора причин отбраковки для FN внутри реф САД-ДАД (если они есть)
+            css = map(x -> (x.code == "eo" || x.code == "eb") && x.itest >= bsad && x.itest <= bdad
+                            && x.bad != 0 ? errorcode(x.bad, 10) : -1, outcomp[h])
+            css = css[findall(x -> x != -1, css)]
+            allcss = Int64[]
+            for i in css allcss = vcat(allcss, i) end
+
+            causesstat[FILEN][h] = FNCauses(nm, h, FN, allcss)
 
             # рисование
             if sigtype == "tone"
@@ -104,12 +129,14 @@ function figures_n_stats(allbins, sigtype)
                 fstone = my_butter(fsig_smooth, 2, 0.3, fs, "high") # устранение постоянной составляющей
             end
 
-            plot(fstone, label = "$sigtype abs")
-            scatter!(ref_pos.-vseg[h].ibeg.+1, fstone[ref_pos.-vseg[h].ibeg.+1], markersize = 2, label = "ref")
-            scatter!(test_pos.-vseg[h].ibeg.+1, fstone[test_pos.-vseg[h].ibeg.+1], markersize = 2, label = "test")
-            scatter!(FPpos.-vseg[h].ibeg.+1, fstone[FPpos.-vseg[h].ibeg.+1], markersize = 3, label = "FP", color = :red)
-            scatter!(FNpos.-vseg[h].ibeg.+1, fstone[FNpos.-vseg[h].ibeg.+1], markersize = 3, label = "FN", color = :purple)
-            scatter!(badpos.-vseg[h].ibeg.+1, fstone[badpos.-vseg[h].ibeg.+1], markersize = 3, markershape = :star, label = "bad", color = :black)
+            plot(fstone, label = "$sigtype")
+            # scatter!(ref_pos.-vseg[h].ibeg.+1, fstone[ref_pos.-vseg[h].ibeg.+1], markersize = 2, label = "ref")
+            # scatter!(test_pos.-vseg[h].ibeg.+1, fstone[test_pos.-vseg[h].ibeg.+1], markersize = 2, label = "test")
+
+            scatter!(TPpos.-vseg[h].ibeg.+1, fstone[TPpos.-vseg[h].ibeg.+1], markersize = 3, label = "TP", color = :green)
+            scatter!(FPpos.-vseg[h].ibeg.+1, fstone[FPpos.-vseg[h].ibeg.+1], markersize = 3, label = "FP", color = :blue)
+            scatter!(FNpos.-vseg[h].ibeg.+1, fstone[FNpos.-vseg[h].ibeg.+1], markersize = 3, label = "FN", color = :yellow)
+            scatter!(badpos.-vseg[h].ibeg.+1, fstone[badpos.-vseg[h].ibeg.+1], markersize = 1, label = "bad", color = :red)
             # scatter!(bad1.-vseg[h].ibeg.+1, fstone[bad1.-vseg[h].ibeg.+1].+100, markersize = 3, markershape = :star, label = "s1", color = :black)
             # scatter!(bad2.-vseg[h].ibeg.+1, fstone[bad2.-vseg[h].ibeg.+1].+200, markersize = 3, markershape = :star, label = "s2", color = :green)
             # scatter!(bad3.-vseg[h].ibeg.+3, fstone[bad3.-vseg[h].ibeg.+1].+300, markersize = 3, markershape = :star, label = "s3", color = :pink)
@@ -121,28 +148,97 @@ function figures_n_stats(allbins, sigtype)
         end
     end
 
-    return statistics
+    return statistics, causesstat
 end
 
-function savestatistics(statistics, sigtype)
+function savestatistics(statistics, tone_causesstat, sigtype)
     if sigtype != "tone" && sigtype != "pres" return "Invalid signal type!" end
 
-    allstats = Stats[] 
-    for i in statistics allstats = vcat(allstats, i) end
-    df = allstats |> DataFrame
+    allTP = allFP = allFN = 0
+    allSemean = allPVPmean = 0.0
 
-    CSV.write("$(sigtype)_statistics.csv", df, delim = ";")
+    # основная статистика
+    allstats = Stats[] 
+    k = 0
+    for i in statistics
+        sumTP = sum(map(x -> x.TP, i)) 
+        sumFP = sum(map(x -> x.FP, i)) 
+        sumFN = sum(map(x -> x.FN, i)) 
+        meanSe = mean(map(x -> x.Se, i)) 
+        meanPVP = mean(map(x -> x.PVP, i)) 
+
+        allstats = vcat(vcat(allstats, i), Stats("Sum TP, FP, FN.\n Mean Se, PVP.", 0, sumTP, sumFP, sumFN, meanSe, meanPVP))
+
+        allTP += sumTP
+        allFP += sumFP
+        allFN += sumFN
+        allSemean += meanSe
+        allPVPmean += meanPVP
+        k += 1
+    end
+
+    allstats = vcat(allstats, Stats("All Sum TP, FP, FN.\n All Mean Se, PVP.", 0, 
+                                    allTP, allFP, allFN, allSemean/k, allPVPmean/k))
+
+    # статистика по причинам ошибок (FN в частности)
+    tone_causes = Int[]
+    for i in tone_causesstat for j in i tone_causes = vcat(tone_causes, j.causes) end end
+    tone_causes = sort(unique(tone_causes))
+
+    numofcauses = Vector{Vector{Int}}[]
+    headerres = NTuple[]
+    FNtotal = 0
+    causestotal = fill(0, length(tone_causes))
+
+    for i in tone_causesstat   # по каждому файлу
+    FNs = 0
+    cntrec = fill(0, length(tone_causes))
+    for k in i             # по кадому измерению
+        cnt = fill(0, length(tone_causes))
+        for p in k.causes
+            if !isempty(p)
+                icauses = findall(x -> x==p, tone_causes)[1]
+                if !isempty(icauses)
+                    for j in tone_causes[icauses]
+                        ind = findall(x -> x==j[1], tone_causes)[1]
+                        cnt[ind] += 1
+                    end
+                end
+            end
+        end
+        FNs += k.FN
+        cntrec += cnt
+        headerres = [headerres..., (filename = k.filename, measure = k.meas, FNnumber = k.FN)]
+        numofcauses = [numofcauses..., Tuple(cnt)]
+    end
+    FNtotal += FNs
+    causestotal += cntrec
+    headerres = [headerres..., (filename = "Sum", measure = 0, FNnumber = FNs)]
+    numofcauses = [numofcauses..., Tuple(cntrec)]
+    end
+    headerres = [headerres..., (filename = "Total", measure = 0, FNnumber = FNtotal)]
+    numofcauses = [numofcauses..., Tuple(causestotal)]
+
+    df = headerres |> DataFrame
+    ndf = numofcauses |> DataFrame
+    currnames = names(ndf)
+    for i in 1:lastindex(currnames) rename!(ndf, currnames[i] => Symbol.(tone_causes[i])) end
+
+
+    stats_df = allstats |> DataFrame
+    causes_df = hcat(df, ndf)
+
+    CSV.write("$(sigtype)_statistics.csv", stats_df, delim = ";")
+    CSV.write("$(sigtype)_causes.csv", causes_df, delim = ";")
 end
 
 dir = "D:/INCART/Pulse_Data/bin"
 files = readdir(dir)
 allbins = files[findall(x -> split(x, ".")[end] == "bin", files)]
 
+tone_statistics, tone_causesstat = figures_n_stats(allbins, "tone")
+pres_statistics, pres_causesstat = figures_n_stats(allbins, "pres")
 
-tone_statistics = figures_n_stats(allbins, "tone")
-pres_statistics = figures_n_stats(allbins, "pres")
-
-savestatistics(tone_statistics, "tone")
-savestatistics(pres_statistics, "pres")
-
+savestatistics(tone_statistics, tone_causesstat, "tone")
+savestatistics(pres_statistics, pres_causesstat, "pres")
 
