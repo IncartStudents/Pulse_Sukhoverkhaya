@@ -164,8 +164,8 @@ function savestatistics(statistics, tone_causesstat, sigtype)
         sumTP = sum(map(x -> x.TP, i)) 
         sumFP = sum(map(x -> x.FP, i)) 
         sumFN = sum(map(x -> x.FN, i)) 
-        meanSe = mean(map(x -> x.Se, i)) 
-        meanPVP = mean(map(x -> x.PVP, i)) 
+        meanSe = round(mean(map(x -> x.Se, i)), digits=2)
+        meanPVP = round(mean(map(x -> x.PVP, i)), digits=2)
 
         allstats = vcat(vcat(allstats, i), Stats("Sum TP, FP, FN.\n Mean Se, PVP.", 0, sumTP, sumFP, sumFN, meanSe, meanPVP))
 
@@ -178,7 +178,7 @@ function savestatistics(statistics, tone_causesstat, sigtype)
     end
 
     allstats = vcat(allstats, Stats("All Sum TP, FP, FN.\n All Mean Se, PVP.", 0, 
-                                    allTP, allFP, allFN, allSemean/k, allPVPmean/k))
+                                    allTP, allFP, allFN, round(allSemean/k, digits=2), round(allPVPmean/k, digits=2)))
 
     # статистика по причинам ошибок (FN в частности)
     tone_causes = Int[]
@@ -208,15 +208,15 @@ function savestatistics(statistics, tone_causesstat, sigtype)
         end
         FNs += k.FN
         cntrec += cnt
-        headerres = [headerres..., (filename = k.filename, measure = k.meas, FNnumber = k.FN)]
+        headerres = [headerres..., (filename = k.filename, meas = k.meas, FN = k.FN)]
         numofcauses = [numofcauses..., Tuple(cnt)]
     end
     FNtotal += FNs
     causestotal += cntrec
-    headerres = [headerres..., (filename = "Sum", measure = 0, FNnumber = FNs)]
+    headerres = [headerres..., (filename = "Sum", meas = 0, FN = FNs)]
     numofcauses = [numofcauses..., Tuple(cntrec)]
     end
-    headerres = [headerres..., (filename = "Total", measure = 0, FNnumber = FNtotal)]
+    headerres = [headerres..., (filename = "Total", meas = 0, FN = FNtotal)]
     numofcauses = [numofcauses..., Tuple(causestotal)]
 
     df = headerres |> DataFrame
@@ -228,8 +228,8 @@ function savestatistics(statistics, tone_causesstat, sigtype)
     stats_df = allstats |> DataFrame
     causes_df = hcat(df, ndf)
 
-    CSV.write("$(sigtype)_statistics.csv", stats_df, delim = ";")
-    CSV.write("$(sigtype)_causes.csv", causes_df, delim = ";")
+    CSV.write("results/$(sigtype)_statistics.csv", stats_df, delim = ";")
+    CSV.write("results/$(sigtype)_causes.csv", causes_df, delim = ";")
 end
 
 dir = "D:/INCART/Pulse_Data/bin"

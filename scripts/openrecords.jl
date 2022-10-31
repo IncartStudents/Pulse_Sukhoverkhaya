@@ -3,8 +3,8 @@ using Plots
 include("../src/readfiles.jl")   # добавление файла с функциями чтения bin- и hdr-файлов
 include("../src/help_func.jl")   # добавление файла со вспомогательными функциями
 
-nm = "PX113211018174339"
-# nm = "PX113211027165348"
+# nm = "PX113211018174339"
+nm = "PX113211028173836"
 
 binfile = "D:/INCART/Pulse_Data/bin/"*nm*".bin"
 pls = "C:/ktiflg/export/"*nm*".pls"
@@ -12,7 +12,7 @@ ton = "C:/ktiflg/export/"*nm*".ton"
 
 signals, fs, timestart, units = readbin(binfile);
 
-ECG = signals.LR    # экг
+ECG = signals[1]    # экг
 Pres = signals.Pres # давление
 Tone = signals.Tone # пульсации
 
@@ -28,6 +28,7 @@ n = 2
 
 segmP = Pres[valid_pres_ref[n][1]:valid_pres_ref[n][2]]
 segmT = Tone[valid_tone_ref[n][1]:valid_tone_ref[n][2]]
+segmECG = ECG[valid_tone_ref[n][1]:valid_tone_ref[n][2]]
 
 presPb = map(x -> x.bg-valid_pres_ref[n][1]+1, pres_ref[n])
 presPe = map(x -> x.en-valid_pres_ref[n][1]+1, pres_ref[n][1:end-1])
