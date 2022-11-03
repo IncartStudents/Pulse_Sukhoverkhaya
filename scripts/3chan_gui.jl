@@ -93,7 +93,7 @@ function LoadButton( v::Globals)
         # чтение данных из файла
         signals, fs, _, _ = readbin(fname)
 
-        ECG = signals.LR     # ЭКГ
+        ECG = signals[1]     # ЭКГ
         Tone = signals.Tone  # пульсации
         Pres = signals.Pres  # давление
 
