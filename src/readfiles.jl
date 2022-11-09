@@ -36,9 +36,9 @@ function readhdr(io::IO)
     ln = split(lines[1], delim)
     num_ch, fs, lsb = parse(Int, ln[1]), parse(Float64, ln[2]), parse(Float64, ln[3])
     type = Int32
-    if (length(ln) > 3) # optional field
-        type = string2datatype[ln[4]]
-    end
+    # if (length(ln) > 3) # optional field
+    #     type = string2datatype[ln[4]]
+    # end
 
     ln = split(lines[2], delim)
     ibeg, iend = parse(Int, ln[1]), parse(Int, ln[2])

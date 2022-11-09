@@ -198,6 +198,11 @@ function get_valid_segments(Pres, Tone, pres_min_amp, tone_min_amp, min_seg_len)
     return valseg
 end
 
+struct AD
+    SAD::Int64
+    DAD::Int64
+end
+
 ### Сохранение разметки
 function save_markup(markup, filename, ext)
     open(filename*ext, "w") do io
@@ -221,9 +226,13 @@ function save_markup(markup, filename, ext)
     end
 end
 
-struct AD
-    SAD::Int64
-    DAD::Int64
+function save_markup(filename, ad::Vector{NamedTuple{(:pump, :desc), NTuple{2, AD}}})
+    open(filename, "w") do io
+        write(io, "SADpump DADpump SADdesc DADdesc")
+        for i in ad
+            write(io, "\n$(i.pump.SAD)   $(i.pump.DAD)   $(i.desc.SAD)   $(i.desc.DAD)")
+        end
+    end
 end
 
 function read_ad(adtablefile)
@@ -255,15 +264,37 @@ function read_ad(adtablefile)
     return ad
 end
 
-function get_ad_bounds(segm::Vector{Float64}, ad::AD)
-    a = b = 0
-    for i in 2:lastindex(segm)
-        if segm[i] <= ad.SAD && segm[i-1] > ad.SAD
-            a = i
-        elseif segm[i] < ad.DAD && segm[i-1] >= ad.DAD
-            b = i-1
+function read_alg_ad(adtablefile)
+    ad = NamedTuple{(:pump, :desc), NTuple{2, AD}}[]
+    needwrite = false
+    open(adtablefile) do file # Открываем файл
+        while !eof(file)
+            line = readline(file)
+            if needwrite
+                values = split(line, "   ")
+                values = map(x -> parse(Int, x), values)
+                push!(ad, (pump = AD(values[1], values[2]), desc = AD(values[3], values[4])))
+            end
+            needwrite = true
         end
     end
+
+    return ad
+end
+
+function get_ad_bounds(segm::Vector{Float64}, ad::AD, ispump::Bool)
+    a = b = 0
+    for i in 2:lastindex(segm)
+        if ispump
+            if segm[i] >= ad.DAD && segm[i-1] < ad.DAD b = i
+            elseif segm[i] > ad.SAD && segm[i-1] <= ad.SAD a = i-1; break end
+        else
+            if segm[i] <= ad.SAD && segm[i-1] > ad.SAD a = i
+            elseif segm[i] < ad.DAD && segm[i-1] >= ad.DAD b = i-1; break end
+        end
+    end
+
+    if !ispump println("$(ad.SAD)   $(ad.DAD)") end
 
     bounds = (isad=a, idad=b)
 
