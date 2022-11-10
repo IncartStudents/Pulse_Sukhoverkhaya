@@ -15,27 +15,29 @@ using .Renderer
 include("../src/help_func.jl")
 include("../src/readfiles.jl") 
 include("../src/my_filt.jl")  
+include("../src/refmkpguifunctions.jl") 
 
 # include(joinpath(pathof(ImPlot), "..", "..", "demo", "implot_demo.jl"))
 # show_demo()
 
-struct Bounds    # Границы рабочей зоны или АД
-    ibeg::Int64
-    iend::Int64
-end
 
 struct Signal    # Нужные каналы и частота дискретизации, вытянутые из бинаря + границы валидных сегментов
     ECG::Vector{Float64}
     Pres::Vector{Float64}
     Tone::Vector{Float64}
     fs::Int64
-    validsegs::Vector{Bounds}
 end
 
-struct Mkp       # Разметки тонов и пульсаций (каждая в векторе своих структур) + AD
-    Pres::Vector{Vector{PresEv}}
-    Tone::Vector{Vector{ToneEv}}
-    AD::Vector{NamedTuple{(:pump, :desc), NTuple{2, Bounds}}}
+mutable struct PlotBounds   # Данные границ сегмента, рабочей зоны и АД ( рз и ад - на накачке и на спуске)
+    AD::NamedTuple{(:pump, :desc), NTuple{2, Bounds}}
+    workreg::NamedTuple{(:pump, :desc), NTuple{2, Bounds}}
+    segbounds::Bounds
+end
+
+struct Mkp       # Разметки тонов и пульсаций (каждая в векторе своих структур)
+    Pres::Vector{PresGuiMkp}
+    Tone::Vector{ToneGuiMkp}
+    bounds::PlotBounds
 end
 
 struct Area      # Границы нарисованной прямогольной зоны + на каком графике нарисована
@@ -59,12 +61,6 @@ mutable struct PlotData     # Данные для построения граф�
     rawPres::PlotElem
     Pres::PlotElem
     Tone::PlotElem
-end
-
-mutable struct PlotBounds   # Данные границ сегмента, рабочей зоны и АД ( рз и ад - на накачке и на спуске)
-    AD::NamedTuple{(:pump, :desc), NTuple{2, Bounds}}
-    workreg::NamedTuple{(:pump, :desc), NTuple{2, Bounds}}
-    segbounds::Bounds
 end
 
 mutable struct PlotLinks    # Для синхронизации масштабов графиков
@@ -107,11 +103,11 @@ mutable struct Globals      # "Глобальные" переменные (гл�
 
     function Globals()
         filename = ""
-        signal = Signal(Float64[], Float64[], Float64[], 0, Bounds[])
+        signal = Signal(Float64[], Float64[], Float64[], 0)
         bnds0 = Bounds(0,0)
-        markup = Mkp(Vector{PresEv}[], Vector{ToneEv}[], Vector{NamedTuple{(:pump, :desc), NTuple{2, Bounds}}}[])
-        tup = PlotElem(Float64[], Int64[], Int64[], Int64[], ImPlotLimits(ImPlotRange(0.0,0.0), ImPlotRange(0.0,0.0)))
         plotbounds = PlotBounds((pump = bnds0, desc = bnds0), (pump = bnds0, desc = bnds0), bnds0)
+        markup = Mkp(PresGuiMkp[], ToneGuiMkp[], plotbounds)
+        tup = PlotElem(Float64[], Int64[], Int64[], Int64[], ImPlotLimits(ImPlotRange(0.0,0.0), ImPlotRange(0.0,0.0)))
         dataforplotting = PlotData(tup, tup, tup, tup)
         plotlinks = PlotLinks(Ref(0.0), Ref(1.0), Ref(0.0), Ref(1.0), true, false)
         combo_item = 1
@@ -137,162 +133,82 @@ mutable struct Globals      # "Глобальные" переменные (гл�
 end
 
 function GeneratePlotData(v::Globals)   # Генерация новых данных для построения графиков
-    # референтные границы САД-ДАД
-    ad = v.markup.AD
 
-    # if length(ad) < v.selecteditem 
-    #     bsad = 1; bdad = v.signal.validsegs[v.selecteditem].iend - v.signal.validsegs[v.selecteditem].ibeg
-    # else
-    #     bounds = get_ad_bounds(v.signal.Pres[v.signal.validsegs[v.selecteditem].ibeg:v.signal.validsegs[v.selecteditem].iend], ad[v.selecteditem])
-    #     if bounds.isad == 0 || bounds.idad == 0 bsad = 1; bdad = v.signal.validsegs[v.selecteditem].iend - v.signal.validsegs[v.selecteditem].ibeg
-    #     else bsad = bounds.isad; bdad = bounds.idad end
-    # end
+    # референтные значения САД-ДАД и рабочей зоны + границы сегмента
+    ad = v.markup.bounds.AD             # по амплитуде
+    wz = v.markup.bounds.workreg        # по амплитуде
+    vseg = v.markup.bounds.segbounds    # по отсчетам
 
-    boundspump = get_ad_bounds(v.signal.Pres[v.signal.validsegs[v.selecteditem].ibeg:v.signal.validsegs[v.selecteditem].iend], AD(ad[v.selecteditem].pump.ibeg, ad[v.selecteditem].pump.iend), true)
-    boundsdesc = get_ad_bounds(v.signal.Pres[v.signal.validsegs[v.selecteditem].ibeg:v.signal.validsegs[v.selecteditem].iend], AD(ad[v.selecteditem].desc.ibeg, ad[v.selecteditem].desc.iend), false)
-    if boundspump.isad == 0 || boundspump.idad == 0 bsadpump = 1; bdadpump = (v.signal.validsegs[v.selecteditem].iend - v.signal.validsegs[v.selecteditem].ibeg)
-    else bsadpump = boundspump.isad; bdadpump = boundspump.idad end
-    if boundsdesc.isad == 0 || boundsdesc.idad == 0 bsaddesc = 1; bdaddesc = (v.signal.validsegs[v.selecteditem].iend - v.signal.validsegs[v.selecteditem].ibeg)
-    else bsaddesc = boundsdesc.isad; bdaddesc = boundsdesc.idad end
+    # поиск границ САД-ДАД и рабочей зоны
+    pump_adbounds = get_bounds(v.signal.Pres[vseg.ibeg:vseg.iend], ad.pump, true)
+    desc_adbounds = get_bounds(v.signal.Pres[vseg.ibeg:vseg.iend], ad.desc, false)
+
+    pump_wzbounds = get_bounds(v.signal.Pres[vseg.ibeg:vseg.iend], wz.pump, true)
+    desc_wzbounds = get_bounds(v.signal.Pres[vseg.ibeg:vseg.iend], wz.desc, false)
+
+    v.plotbounds = PlotBounds((pump = pump_adbounds, desc = desc_adbounds), (pump = pump_wzbounds, desc = desc_wzbounds), vseg)
 
     # ЭКГ
-    ECG = v.signal.ECG[v.signal.validsegs[v.selecteditem].ibeg:v.signal.validsegs[v.selecteditem].iend]
+    ECG = v.signal.ECG[vseg.ibeg:vseg.iend]
 
     # тоны
-    seg = v.signal.Tone[v.signal.validsegs[v.selecteditem].ibeg:v.signal.validsegs[v.selecteditem].iend]
+    seg = v.signal.Tone[vseg.ibeg:vseg.iend]
 
-    smoothtone = my_butter(seg, 2, 60, v.signal.fs, "low") # сглаженный тонов
-    ftone = my_butter(smoothtone, 2, 30, v.signal.fs, "high") # фильтрованный тонов
-    tone_sig = my_butter(abs.(ftone), 2, 10, v.signal.fs, "low") # огибающая по модулю
+    smoothtone = my_butter(seg, 2, 60, v.signal.fs, "low")          # сглаженный тонов
+    ftone = my_butter(smoothtone, 2, 30, v.signal.fs, "high")       # фильтрованный тонов
+    tone_sig = my_butter(abs.(ftone), 2, 10, v.signal.fs, "low")    # огибающая по модулю
 
-    tone_peaks = map(x -> x.pos-v.signal.validsegs[v.selecteditem].ibeg+1, v.markup.Tone[v.selecteditem])
+    tone_peaks = map(x -> x.pos, v.markup.Tone)
 
     # пульсации
-    seg = v.signal.Pres[v.signal.validsegs[v.selecteditem].ibeg:v.signal.validsegs[v.selecteditem].iend]
+    seg = v.signal.Pres[vseg.ibeg:vseg.iend]
 
     fsig_smooth = my_butter(seg, 2, 10, v.signal.fs, "low") # сглаживание
     pres_sig = my_butter(fsig_smooth, 2, 0.3, v.signal.fs, "high") # устранение постоянной составляющей
 
-    pres_begs = map(x -> x.ibeg-v.signal.validsegs[v.selecteditem].ibeg+1, v.markup.Pres[v.selecteditem])
-    pres_ends = map(x -> x.iend-v.signal.validsegs[v.selecteditem].ibeg+1, v.markup.Pres[v.selecteditem])
-
-    # границы рабочей зоны (пик треугольника давления - 10 мм, минимум спуска + 10 мм)
-    # на спуске
-    lvlbeg = maximum(seg) - 30; lvlend = seg[end] >= 30 ? seg[end]+10 : 30
-    wbeg = 1; wend = length(seg)
-    for i in 2:lastindex(seg) if seg[i] <= lvlbeg && seg[i-1] > lvlbeg wbeg = i
-                                elseif seg[i] < lvlend && seg[i-1] >= lvlend && i>wbeg!=1 wend = i end end
-    # на накачке
-    lvlend = maximum(seg) - 30; lvlbeg = seg[1] >= 30 ? seg[1]+10 : 30
-    pwbeg = 1; pwend = length(seg)
-    for i in 2:lastindex(seg) if seg[i] >= lvlbeg && seg[i-1] < lvlbeg pwbeg = i
-                                elseif seg[i] > lvlend && seg[i-1] <= lvlend && i>pwbeg!=1 pwend = i-1 
-                                    break 
-                                end 
-    end
-
-    # переропределение сад и дад, если не найдены
-    if bsadpump == 1 bsadpump = pwend-100; bdadpump = pwbeg+100 end
-    if bsaddesc == 1 bsaddesc = wbeg+100; bdaddesc = wend-100 end
+    pres_begs = map(x -> x.ibeg, v.markup.Pres)
+    pres_ends = map(x -> x.iend, v.markup.Pres)
 
     # расставление типов меток по умолчанию (все, что за границами рабочей зоны - в незначимые, остальные - (пока) в значимые)
-    tone_peaks_type = map(x -> x < pwbeg || x > pwend && x < wbeg || x > wend ? 0 : 1, tone_peaks)
-    pres_peaks_type = map(x -> x < pwbeg || x > pwend && x < wbeg || x > wend ? 0 : 1, pres_begs)
+    tone_peaks_type = map(x -> x < pump_wzbounds.ibeg || (x > pump_wzbounds.iend && x < desc_wzbounds.ibeg) || x > desc_wzbounds.iend ? 0 : 1, tone_peaks)
+    pres_peaks_type = map(x -> x < pump_wzbounds.ibeg || (x > pump_wzbounds.iend && x < desc_wzbounds.ibeg) || x > desc_wzbounds.iend ? 0 : 1, pres_begs)
 
-    ad_bounds_desc = Bounds(bsaddesc, bdaddesc)
-    ad_bounds_pump = Bounds(bsadpump, bdadpump)
-    workreg_desc = Bounds(wbeg, wend)
-    workreg_pump = Bounds(pwbeg, pwend)
     ECGtup = PlotElem(ECG, Int64[], Int64[], Int64[], ImPlotLimits(ImPlotRange(0.0, length(ECG) |> Float64),ImPlotRange(minimum(ECG), maximum(ECG))))
     RawPrestup = PlotElem(seg, Int64[], Int64[], Int64[], ImPlotLimits(ImPlotRange(0.0, length(seg) |> Float64),ImPlotRange(minimum(seg), maximum(seg))))
     Prestup = PlotElem(pres_sig, pres_begs, pres_ends, pres_peaks_type, ImPlotLimits(ImPlotRange(0.0, length(pres_sig) |> Float64),ImPlotRange(minimum(pres_sig), maximum(pres_sig))))
     Tonetup = PlotElem(tone_sig, tone_peaks, tone_peaks, tone_peaks_type, ImPlotLimits(ImPlotRange(0.0, length(tone_sig) |> Float64),ImPlotRange(minimum(tone_sig), maximum(tone_sig))))
 
     v.dataforplotting = PlotData(ECGtup, RawPrestup, Prestup, Tonetup)
-    v.plotbounds = PlotBounds((pump = ad_bounds_pump, desc = ad_bounds_desc), (pump = workreg_pump, desc = workreg_desc), v.signal.validsegs[v.selecteditem])
 end
 
-function ReadData(fname, v::Globals) # Чтение данных из нового выбранного файла
-    # чтение данных из файла
-    signals, fs, _, _ = readbin(fname)
+function ReadData(v::Globals) # Чтение данных из нового выбранного файла
+
+    # чтение сигнала из бинаря
+    signals, fs, _, _ = readbin(v.fold*"/"*v.allfiles[v.combo_item])
 
     ECG = signals[1]     # ЭКГ
     Tone = signals.Tone  # пульсации
     Pres = signals.Pres  # давление
 
-    # получение валидных сегментов
-    vseg = get_valid_segments(Pres, Tone, 15, -1e7, 30*fs)
-    vseg = map(x -> Bounds(x.ibeg, x.iend), vseg)
-
-    v.signal = Signal(ECG, Pres, Tone, fs, vseg)
-
-    # парсинг тестовой разметки
+    # чтение разметки: если есть в реф - из реф, если нету - из тест
+    # если есть - зачитываем сразу 
+    srcdir = "formatted alg markup"
+    dstdir = "ref markup"
     basename = split(v.fold, "/")[end]
-    Pres_mkp = test_markup_parse("alg markup/$basename/$(v.allfiles[v.combo_item]).pres")
-    Tone_mkp = test_markup_parse("alg markup/$basename/$(v.allfiles[v.combo_item]).tone")
+    name = v.allfiles[v.combo_item]
+    measure = v.selecteditem
 
-    # референтные границы САД и ДАД
-    n = length(Pres_mkp)
-    ad = fill((pump = AD(0,0), desc = AD(0,0)), n)
-    # try
-        basename = split(v.fold, "/")[end]
-        adtablefile = "D:/INCART/Pulse_Data/ref AD/$basename/$(v.allfiles[v.combo_item]).ad"
-        ad0 = read_alg_ad(adtablefile)
-        ad[1:length(ad0)] = ad0
-    # catch e
-    # end
+    dir = try readdir("$dstdir/$basename/$name/$measure"); dstdir catch e srcdir end
 
-    ad = map(x -> (pump = Bounds(x.pump.SAD, x.pump.DAD), desc = Bounds(x.desc.SAD, x.desc.DAD)), ad)
+    # зачитывание разметки из реф
+    Pres_mkp = ReadRefMkp("$dir/$basename/$name/$measure/pres.csv")
+    Tone_mkp = ReadRefMkp("$dir/$basename/$name/$measure/tone.csv")
+    bnds = ReadRefMkp("$dir/$basename/$name/$measure/bounds.csv")
 
-    v.markup = Mkp(Pres_mkp, Tone_mkp, ad)
-
-    v.tabledata = map((y,z) -> ("Номер измерения" => y, "САД реф." => z.desc.ibeg, "ДАД реф." => z.desc.iend), 
-                                                                        range(1,n), ad)
+    v.markup = Mkp(Pres_mkp, Tone_mkp, PlotBounds(bnds.ad, bnds.wz, bnds.segm))
+    v.signal = Signal(ECG, Pres, Tone, fs)
 
     GeneratePlotData(v)
-end
-
-function SaveRefMarkup(filename::String, ext::String, markup::PlotElem, Pres) # Сохранение исправленной референтной разметки
-    open(filename*ext, "w") do io
-
-        if ext == ".pres" write(io, "beg   end   type")
-        elseif ext == ".tone" write(io, "pos   type") end
-
-        for j in 1:lastindex(markup.ibegs)
-            if ext == ".pres"
-                write(io, "\n$(markup.ibegs[j])   $(markup.iends[j])   $(markup.type[j])")
-            elseif ext == ".tone"
-                write(io, "\n$(markup.ibegs[j])   $(markup.type[j])")
-            end
-        end
-
-    end
-end
-
-function SaveRefMarkup(filename::String, ext::String, markup::PlotBounds, v::Globals) # Сохранение границ сегмента, рабочей зоны и АД
-    Pres = v.dataforplotting.rawPres.sig
-    
-    ibeg = markup.segbounds.ibeg; Abeg = round(Pres[1]) |> Int64
-    iend = markup.segbounds.iend; Aend = round(Pres[end]) |> Int64
-    
-    isadpump = v.plotbounds.AD.pump.ibeg; Asadpump = round(Pres[isadpump]) |> Int64
-    idadpump = v.plotbounds.AD.pump.iend; Adadpump = round(Pres[idadpump]) |> Int64
-    isaddesc = v.plotbounds.AD.desc.ibeg; Asaddesc = round(Pres[isaddesc]) |> Int64
-    idaddesc = v.plotbounds.AD.desc.iend; Adaddesc = round(Pres[idaddesc]) |> Int64
-
-    iwbegpump = v.plotbounds.workreg.pump.ibeg; Awbegpump = round(Pres[iwbegpump]) |> Int64
-    iwendpump = v.plotbounds.workreg.pump.iend; Awendpump = round(Pres[iwendpump]) |> Int64
-    iwbegdesc = v.plotbounds.workreg.desc.ibeg; Awbegdesc = round(Pres[iwbegdesc]) |> Int64
-    iwenddesc = v.plotbounds.workreg.desc.iend; Awenddesc = round(Pres[iwenddesc]) |> Int64
-
-    open(filename*ext, "w") do io
-        write(io, "var   beg   end   PAbeg   PAend")
-        write(io, "\nSEGbnd   $ibeg   $iend   $Abeg   $Aend")
-        write(io, "\nADpump   $isadpump   $idadpump   $Asadpump   $Adadpump")
-        write(io, "\nADdesc   $isaddesc   $idaddesc   $Asaddesc   $Adaddesc")
-        write(io, "\nWZpump   $iwbegpump   $iwendpump   $Awbegpump   $Awendpump")
-        write(io, "\nWZdesc   $iwbegdesc   $iwenddesc   $Awbegdesc   $Awenddesc")
-    end
 end
 
 function SaveRefMarkupButton(v::Globals) # Кнопка сохранения исправленной референтной разметки тонов и пульсаций + границ сегмента, рабочей зоны и АД для текущего измерения выбранного файла
@@ -309,15 +225,25 @@ function SaveRefMarkupButton(v::Globals) # Кнопка сохранения и�
             dirname0 = "ref markup/$basename/$(v.allfiles[v.combo_item])"
             try readdir(dirname0)
             catch e mkdir(dirname0) end
-            dirname = "ref markup/$basename/$(v.allfiles[v.combo_item])/measure $(v.tabledata[v.selecteditem][1][2])"
+            dirname = "ref markup/$basename/$(v.allfiles[v.combo_item])/$(v.tabledata[v.selecteditem][1][2])"
             try readdir(dirname)
             catch e mkdir(dirname) end
 
-            filename = "$dirname/$(v.tabledata[v.selecteditem][1][2])"
-            ext = [".pres", ".tone", ".bounds"]
-            markup = [v.dataforplotting.Pres, v.dataforplotting.Tone, v.plotbounds]
+            Pres = v.dataforplotting.rawPres.sig
 
-            for i in 1:lastindex(ext) SaveRefMarkup(filename, ext[i], markup[i], v) end
+            pres_markup = map((x,y,z) -> PresGuiMkp(x, y, z), v.dataforplotting.Pres.ibegs, v.dataforplotting.Pres.iends, v.dataforplotting.Pres.type)
+            tone_markup = map((x,y) -> ToneGuiMkp(x, y), v.dataforplotting.Tone.ibegs, v.dataforplotting.Tone.type)
+            ad = (pump = AD(round(Int, Pres[v.plotbounds.AD.pump.iend]), round(Int, Pres[v.plotbounds.AD.pump.ibeg])), 
+                    desc = AD(round(Int, Pres[v.plotbounds.AD.desc.ibeg]), round(Int, Pres[v.plotbounds.AD.desc.iend])))
+            wz = (pump = Bounds(round(Int, Pres[v.plotbounds.workreg.pump.iend]), round(Int, Pres[v.plotbounds.workreg.pump.ibeg])), 
+                    desc = Bounds(round(Int, Pres[v.plotbounds.workreg.desc.ibeg]), round(Int, Pres[v.plotbounds.workreg.desc.iend])))
+            segbounds = v.plotbounds.segbounds
+
+            SaveRefMarkup("$dirname/pres.csv", pres_markup) 
+            SaveRefMarkup("$dirname/tone.csv", tone_markup) 
+            SaveRefMarkup("$dirname/bounds.csv", segbounds, ad, wz) 
+
+            MakeTableData(v)
         end
     end
 end
@@ -339,7 +265,8 @@ function FilenamesTable(v::Globals)
             CImGui.PushID(i)
             if CImGui.Selectable(v.allfiles[i], i == v.combo_item)
                 v.combo_item = i
-                ReadData(v.fold*"/"*v.allfiles[v.combo_item], v)
+                ReadData(v)
+                MakeTableData(v) 
                 GeneratePlotData(v)
                 ChangePlotsID(v)
             end
@@ -353,8 +280,23 @@ function FilenamesTable(v::Globals)
     end
 end
 
+function MakeTableData(v::Globals) # чтение реф границ АД для всех измерений в файле
+    dir0 = "ref markup"
+    dir = "formatted alg markup"
+    basename = split(v.fold, "/")[end]
+    name = v.allfiles[v.combo_item]
+    allmesfiles = readdir("$dir/$basename/$name")
+    v.tabledata = fill(("Номер измерения" => 0, "САД реф." => 0, "ДАД реф." => 0), length(allmesfiles))
+    for i in 1:lastindex(allmesfiles)
+        bnds = try ReadRefMkp("$dir0/$basename/$name/$(allmesfiles[i])/bounds.csv")
+                catch e ReadRefMkp("$dir/$basename/$name/$(allmesfiles[i])/bounds.csv") end
+        v.tabledata[i] = ("Номер измерения" => i, "САД реф." => bnds.ad.desc.ibeg, "ДАД реф." => bnds.ad.desc.iend)
+    end
+end
+
 function MeasuresTable(v::Globals)   # Таблица с границами АД для всех измерений выбранного файла
     if !isempty(v.allfiles)
+        if isempty(v.tabledata) MakeTableData(v) end
         CImGui.NewLine()
         names = map(x -> x[1], v.tabledata[1])
         col = length(names)
@@ -376,6 +318,7 @@ function MeasuresTable(v::Globals)   # Таблица с границами АД
                 CImGui.PushID(i)
                 if CImGui.Selectable(string(j[2]), i == v.selecteditem, CImGui.ImGuiSelectableFlags_SpanAllColumns)
                     v.selecteditem = i 
+                    ReadData(v)
                     GeneratePlotData(v)
                     ChangePlotsID(v)
                 end
@@ -390,14 +333,9 @@ function MeasuresTable(v::Globals)   # Таблица с границами АД
 end
 
 function MenuWindow(v::Globals)   # Окно меню
-    # CImGui.SetNextWindowPos(ImVec2(0,0))
-    # CImGui.SetNextWindowSize(ImVec2(s.w, s.h/2))
     CImGui.Begin("Меню")
-        # LoadButtons(v)
-        # FilenamesCombo(v)
         BasesTable(v)
         FilenamesTable(v)
-        # SaveRefMarkupButton(v)
         MeasuresTable(v)
     CImGui.End()
 end
@@ -471,7 +409,7 @@ function InsideArea(v::Globals, whichplot)  # Действия с точками
     end
 end
 
-function MouseClick(v::Globals, ymax, whichplot)  # Ответ на определенные клики мышью по графику
+function MouseClick(v::Globals, whichplot)  # Ответ на определенные клики мышью по графику
     if ImPlot.IsPlotHovered() && CImGui.IsMouseClicked(0) && unsafe_load(CImGui.GetIO().KeyCtrl)  # точка (Ctrl + клик левой кнопкой) 
         pt = ImPlot.GetPlotMousePos()
         if whichplot == "tone"
@@ -487,7 +425,7 @@ function MouseClick(v::Globals, ymax, whichplot)  # Ответ на опреде
         end
 
         # чтобы реже случались промахи, ищем в окрестностях позиции курсора во время клика максимум сигнала
-        mp = round(pt.x) |> Int64
+        mp = round(Int, pt.x)
         sr = 100
         newpeak = argmax(sig[mp-sr:mp+sr])[1] + (mp-sr)
 
@@ -562,26 +500,26 @@ function MouseClick(v::Globals, ymax, whichplot)  # Ответ на опреде
             leftpump = v.plotbounds.workreg.pump.ibeg; rightpump = v.plotbounds.workreg.pump.iend
             leftdesc = v.plotbounds.workreg.desc.ibeg; rightdesc = v.plotbounds.workreg.desc.iend
             if abs(pt.x-leftpump) <= r # двигаем левую границу на накачке
-                leftpump = round(pt.x) |> Int64
+                leftpump = round(Int, pt.x)
             elseif abs(pt.x-leftdesc) <= r # двигаем левую границу на спуске
-                leftdesc = round(pt.x) |> Int64
+                leftdesc = round(Int, pt.x) 
             elseif abs(pt.x-rightpump) <= r #двигаем правую границу на накачке
-                rightpump = round(pt.x) |> Int64
+                rightpump = round(Int, pt.x) 
             elseif abs(pt.x-rightdesc) <= r #двигаем правую границу на спуске
-                rightdesc = round(pt.x) |> Int64
+                rightdesc = round(Int, pt.x) 
             end
             v.plotbounds.workreg = (pump = Bounds(leftpump, rightpump), desc = Bounds(leftdesc, rightdesc))
         elseif v.mode == 2 # двигаем границы реф АД
             leftpump = v.plotbounds.AD.pump.ibeg; rightpump = v.plotbounds.AD.pump.iend
             leftdesc = v.plotbounds.AD.desc.ibeg; rightdesc = v.plotbounds.AD.desc.iend
             if abs(pt.x-leftpump) <= r          # двигаем левую границу на накачке
-                leftpump = round(pt.x) |> Int64
+                leftpump = round(Int, pt.x)
             elseif abs(pt.x-leftdesc) <= r      # двигаем левую границу на спуске
-                leftdesc = round(pt.x) |> Int64
+                leftdesc = round(Int, pt.x)
             elseif abs(pt.x-rightpump) <= r     #двигаем правую границу на накачке
-                rightpump = round(pt.x) |> Int64
+                rightpump = round(Int, pt.x)
             elseif abs(pt.x-rightdesc) <= r     #двигаем правую границу на спуске
-                rightdesc = round(pt.x) |> Int64
+                rightdesc = round(Int, pt.x)
             end
             v.plotbounds.AD = (pump = Bounds(leftpump, rightpump), desc = Bounds(leftdesc, rightdesc))
         end
@@ -603,7 +541,7 @@ end
 
 function BoundsInput(id::String, pos::Int64, sig, bound::Int64, ispump::Bool) # Поле ввода и отображения значения
     CImGui.SameLine(pos)
-    str01 = round(sig[bound]) |> Int64
+    str01 = round(Int, sig[bound])
     str1 = string(str01)
     CImGui.SetNextItemWidth(70)
     CImGui.InputText(id, str1, 4)
@@ -627,13 +565,13 @@ function BoundsFields(v::Globals) # Поля ввода и отображени�
 
     sig = v.dataforplotting.rawPres.sig
 
-    isadpump = v.plotbounds.AD.pump.ibeg
-    idadpump = v.plotbounds.AD.pump.iend
+    idadpump = v.plotbounds.AD.pump.ibeg
+    isadpump = v.plotbounds.AD.pump.iend
     isaddesc = v.plotbounds.AD.desc.ibeg
     idaddesc = v.plotbounds.AD.desc.iend
 
-    iwbegpump = v.plotbounds.workreg.pump.ibeg
-    iwendpump = v.plotbounds.workreg.pump.iend
+    iwendpump = v.plotbounds.workreg.pump.ibeg
+    iwbegpump = v.plotbounds.workreg.pump.iend
     iwbegdesc = v.plotbounds.workreg.desc.ibeg
     iwenddesc = v.plotbounds.workreg.desc.iend
 
@@ -659,8 +597,8 @@ function BoundsFields(v::Globals) # Поля ввода и отображени�
     iwbegdesc = BoundsInput("##WBEGdesc", 345, sig, iwbegdesc, false)
     iwenddesc = BoundsInput("##WENDdesc", 420, sig, iwenddesc, false)
 
-    v.plotbounds.AD = (pump = Bounds(isadpump, idadpump), desc = Bounds(isaddesc, idaddesc))
-    v.plotbounds.workreg = (pump = Bounds(iwbegpump, iwendpump), desc = Bounds(iwbegdesc, iwenddesc))
+    v.plotbounds.AD = (pump = Bounds(idadpump, isadpump), desc = Bounds(isaddesc, idaddesc))
+    v.plotbounds.workreg = (pump = Bounds(iwendpump, iwbegpump), desc = Bounds(iwbegdesc, iwenddesc))
 end
 
 function ChangeTypeCombo(v::Globals) # Выпадающий список типов меток
@@ -700,7 +638,6 @@ function ChangePlotsID(v::Globals) # Изменение айдишников к�
 end
 
 function FigureWindow(v::Globals) # Окно графиков с разметкой
-
     CImGui.Begin("Разметка")
 
     if !isempty(v.allfiles)
@@ -742,7 +679,7 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
                 PlotLine(5, [wbegdesc, wbegdesc], [ymin, ymax])
                 PlotLine(5, [wenddesc, wenddesc], [ymin, ymax])
 
-                MouseClick(v, ymax, "ecg")
+                MouseClick(v, "ecg")
 
                 ImPlot.EndPlot()
             end
@@ -776,7 +713,7 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
                 PlotLine(5, [wenddesc, wenddesc], [ymin*0.8, ymax*1.1], label = "Рабочая зона на спуске")
 
 
-                MouseClick(v, ymax, "pres")
+                MouseClick(v, "pres")
 
                 ImPlot.EndPlot()
             end
@@ -834,7 +771,7 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
                     Scatter(8, ends2, sig[ends2], ImPlotMarker_Square, 5, "Шум")
                 end
 
-                MouseClick(v, ymax, "pulse")
+                MouseClick(v, "pulse")
 
                 if v.area.whichplot == "pulse"
                     InsideArea(v, "pulse")
@@ -898,7 +835,7 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
                     Scatter(9, v.selected_peaks, sig[v.selected_peaks], ImPlotMarker_Circle, 5, false)
                 end
 
-                MouseClick(v, ymax, "tone")
+                MouseClick(v, "tone")
 
                 if v.area.whichplot == "tone"
                     InsideArea(v, "tone")
@@ -925,7 +862,7 @@ function ReadBase(v::Globals)
     listoffiles = readdir(folder)
     allbins = map(x -> split(x,".")[end] == "bin" ? split(x,".")[1] : "", listoffiles)
     v.allfiles = filter(x -> !isempty(x), allbins)
-    ReadData(folder*"/"*v.allfiles[v.combo_item], v)
+    ReadData(v)
 end
 
 function BasesTable(v::Globals)

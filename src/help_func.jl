@@ -28,6 +28,12 @@ struct Comp   # результат сравнения по каждой точк
     code::String # составной код ошибки (см errors.txt)
 end
 
+struct Bounds    # Границы рабочей зоны или АД
+    ibeg::Int64
+    iend::Int64
+end
+
+
 # Поиск границ сегментов (валидных) по набору меток (1 или 0) айдишников отсчетов
 
 # Вход: вектор булевых значений (меток валидности каждого отсчета)
@@ -282,21 +288,21 @@ function read_alg_ad(adtablefile)
     return ad
 end
 
-function get_ad_bounds(segm::Vector{Float64}, ad::AD, ispump::Bool)
-    a = b = 0
+function get_bounds(segm::Vector{Float64}, bnd::Bounds, ispump::Bool)
+    a = ispump ? 10 : argmax(segm) + 10
+    b = ispump ? argmax(segm) + 10 : lastindex(segm) - 10
+
     for i in 2:lastindex(segm)
         if ispump
-            if segm[i] >= ad.DAD && segm[i-1] < ad.DAD b = i
-            elseif segm[i] > ad.SAD && segm[i-1] <= ad.SAD a = i-1; break end
+            if segm[i] >= bnd.iend && segm[i-1] < bnd.iend a = i
+            elseif segm[i] > bnd.ibeg && segm[i-1] <= bnd.ibeg b = i-1; break end
         else
-            if segm[i] <= ad.SAD && segm[i-1] > ad.SAD a = i
-            elseif segm[i] < ad.DAD && segm[i-1] >= ad.DAD b = i-1; break end
+            if segm[i] <= bnd.ibeg && segm[i-1] > bnd.ibeg a = i
+            elseif segm[i] < bnd.iend && segm[i-1] >= bnd.iend b = i-1; break end
         end
     end
 
-    if !ispump println("$(ad.SAD)   $(ad.DAD)") end
-
-    bounds = (isad=a, idad=b)
+    bounds = Bounds(a,b)
 
     return bounds
 end

@@ -1,7 +1,7 @@
 include("../src/readfiles.jl")     # добавление файла с функциями чтения bin- и hdr-файлов
 include("../src/one_seg_calc.jl")
 
-dir = "D:/INCART/Pulse_Data/Шумовая база"  # путь к базе
+dir = "D:/INCART/Pulse_Data/все базы/Шумовая база"  # путь к базе
 files = readdir(dir)
 allbins = files[findall(x -> split(x, ".")[end] == "bin", files)]
 
