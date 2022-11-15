@@ -53,7 +53,7 @@ function IDtoSegBounds(ID::Vector{Bool})
     end
     if ID[end-1] ends[end] = true end
 
-    bounds = map((x,y) -> (ibeg = x, iend = y), findall(begs), findall(ends))
+    bounds = map((x,y) -> Bounds(x,y), findall(begs), findall(ends))
 
     return bounds
 end
@@ -289,14 +289,18 @@ function read_alg_ad(adtablefile)
 end
 
 function get_bounds(segm::Vector{Float64}, bnd::Bounds, ispump::Bool)
-    a = ispump ? 10 : argmax(segm) + 10
-    b = ispump ? argmax(segm) + 10 : lastindex(segm) - 10
+    prespeak = argmax(segm)
+    len = length(segm)
+    a = ispump ? round(Int, 0.1*len) : prespeak + round(Int, 0.1*len)
+    b = ispump ? prespeak + round(Int, 0.1*len) : len - round(Int, 0.1*len)
 
-    for i in 2:lastindex(segm)
-        if ispump
+    if ispump
+        for i in 2:prespeak
             if segm[i] >= bnd.iend && segm[i-1] < bnd.iend a = i
             elseif segm[i] > bnd.ibeg && segm[i-1] <= bnd.ibeg b = i-1; break end
-        else
+        end
+    else
+        for i in prespeak+1:len
             if segm[i] <= bnd.ibeg && segm[i-1] > bnd.ibeg a = i
             elseif segm[i] < bnd.iend && segm[i-1] >= bnd.iend b = i-1; break end
         end

@@ -9,26 +9,26 @@ include("../src/refmkpguifunctions.jl")
 rawpath = "D:/INCART/Pulse_Data/все базы"
 mkppath = "alg markup"
 adpath = "D:/INCART/Pulse_Data/ref AD"
-basename = "Шумовая база"
+basenm = "КТ 07 АД ЭКГ"
 # filename = "PX11321102817293"
 
 redalgmarkuppath = "formatted alg markup"
 
-allbasefiles = readdir("$rawpath/$basename")
+allbasefiles = readdir("$rawpath/$basenm")
 allbins = filter(x -> split(x, ".")[end]=="bin", allbasefiles)
 allfnames = map(x -> split(x, ".")[1], allbins)
 
 for filename in allfnames
     # чтение исходного сигнала
-    signals, fs, _, _ = readbin("$rawpath/$basename/$filename")
+    signals, fs, _, _ = readbin("$rawpath/$basenm/$filename")
     Tone = signals.Tone  # пульсации
     Pres = signals.Pres  # давление
 
     # получение валидных сегментов (тем же способом, что и в алгоритме - в противном случае вытянуть из самой разметки)
     vseg = get_valid_segments(Pres, Tone, 15, -1e7, 30*fs)
 
-    Pres_mkp = test_markup_parse("$mkppath/$basename/$filename.pres")
-    Tone_mkp = test_markup_parse("$mkppath/$basename/$filename.tone")
+    Pres_mkp = test_markup_parse("$mkppath/$basenm/$filename.pres")
+    Tone_mkp = test_markup_parse("$mkppath/$basenm/$filename.tone")
 
     # перетягиваем разметку из алгоритма в гуишную с поправкой на позицию начала сегмента, так как в гуишной
     # начало каждого сегмента принимается за ноль (но хранится информация о положении начала сегмента во всем сигнале)
@@ -36,7 +36,7 @@ for filename in allfnames
     Tone_guimkp = map((x,d) -> map(y -> ToneGuiMkp(y.pos-d.ibeg, 0), x), Tone_mkp, vseg)
 
     # получение референтных границ АД и рабочей зоны на накачке и на спуске
-    ad_alg = read_alg_ad("$adpath/$basename/$filename.ad")
+    ad_alg = read_alg_ad("$adpath/$basenm/$filename.ad")
 
     # границы рабочей зоны (пик треугольника давления - 10 мм, минимум спуска + 10 мм)
     # на спуске
@@ -47,13 +47,13 @@ for filename in allfnames
 
     try readdir(redalgmarkuppath)
     catch e mkdir(redalgmarkuppath) end
-    try readdir("$redalgmarkuppath/$basename")
-    catch e mkdir("$redalgmarkuppath/$basename") end
-    try readdir("$redalgmarkuppath/$basename/$filename")
-    catch e mkdir("$redalgmarkuppath/$basename/$filename") end
+    try readdir("$redalgmarkuppath/$basenm")
+    catch e mkdir("$redalgmarkuppath/$basenm") end
+    try readdir("$redalgmarkuppath/$basenm/$filename")
+    catch e mkdir("$redalgmarkuppath/$basenm/$filename") end
 
     for i in 1:lastindex(vseg)
-        fold = "$redalgmarkuppath/$basename/$filename/$i"
+        fold = "$redalgmarkuppath/$basenm/$filename/$i"
         try readdir(fold)
         catch e mkdir(fold) end    
         SaveRefMarkup("$fold/pres.csv", Pres_guimkp[i])

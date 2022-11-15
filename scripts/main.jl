@@ -1,7 +1,7 @@
 include("../src/readfiles.jl")     # добавление файла с функциями чтения bin- и hdr-файлов
 include("../src/one_seg_calc.jl")
 
-dir = "D:/INCART/Pulse_Data/все базы/Шумовая база"  # путь к базе
+dir = "D:/INCART/Pulse_Data/все базы/КТ 07 АД ЭКГ"  # путь к базе
 files = readdir(dir)
 allbins = files[findall(x -> split(x, ".")[end] == "bin", files)]
 
@@ -15,7 +15,7 @@ function refADcalc(tonemkp::Vector{ToneEv}, ad::Vector{AD}, Tone::Vector{Float64
     segm = my_butter(abs.(ftone), 2, 10, fs, "low") # огибающая по модулю
 
     peaks = map(x -> (x.pos - seg[i].ibeg + 1), tonemkp)
-    # peaks = filter(x -> x!=0, peaks)
+    # peaks = map(x -> x.pos, tonemkp) # исп для теста с разметкой гуишного типа
 
     ipresmax = argmax(pres)
     pumppeaks = filter(x -> x<ipresmax, peaks)
@@ -23,19 +23,49 @@ function refADcalc(tonemkp::Vector{ToneEv}, ad::Vector{AD}, Tone::Vector{Float64
     ipumpmax = argmax(segm[pumppeaks]); apumpmax = maximum(segm[pumppeaks])
     idescmax = argmax(segm[descpeaks]); adescmax = maximum(segm[descpeaks])
 
-    refDADpump = round(pres[pumppeaks[1]]) |> Int64; refSADpump = round(pres[pumppeaks[end]]) |> Int64
-    refSADdesc = round(pres[descpeaks[1]]) |> Int64; refDADdesc = round(pres[descpeaks[end]]) |> Int64
+    refDADpump = round(Int, pres[pumppeaks[1]]); refSADpump = round(Int, pres[pumppeaks[end]])
+    refSADdesc = round(Int, pres[descpeaks[1]]); refDADdesc = round(Int, pres[descpeaks[end]])
 
-    for j in pumppeaks[ipumpmax:-1:1] if segm[j] <= 0.2*apumpmax refDADpump = round(pres[j]) |> Int64; break end end
-    for j in pumppeaks[ipumpmax:1:end] if segm[j] <= 0.2*apumpmax refSADpump = round(pres[j]) |> Int64; break end end
+    lp = pumppeaks[ipumpmax]
+    for j in pumppeaks[ipumpmax:-1:1] 
+        if segm[j] <= 0.2*apumpmax 
+            refDADpump = abs(j-lp) < 2*fs ? round(Int, pres[j]) : round(Int, pres[lp])
+            break 
+        end 
+        lp = j
+    end
+
+    lp = pumppeaks[ipumpmax]
+    for j in pumppeaks[ipumpmax:1:end] 
+        if segm[j] <= 0.2*apumpmax 
+            refSADpump = abs(j-lp) < 2*fs ? round(Int, pres[j]) : round(Int, pres[lp])
+            break 
+        end 
+        lp = j
+    end
 
 
     if !isempty(ad) && length(ad) >= i
         refSADdesc = ad[i].SAD
         refDADdesc = ad[i].DAD
     else
-        for j in descpeaks[idescmax:-1:1] if segm[j] <= 0.2*adescmax refSADdesc = round(pres[j]) |> Int64; break end end
-        for j in descpeaks[idescmax:1:end] if segm[j] <= 0.2*adescmax refDADdesc = round(pres[j]) |> Int64; break end end
+        lp = descpeaks[idescmax]
+        for j in descpeaks[idescmax:-1:1] 
+            if segm[j] <= 0.2*adescmax 
+                refSADdesc = abs(j-lp) < 2*fs ? round(Int, pres[j]) : round(Int, pres[lp])
+                break 
+            end 
+            lp = j
+        end
+
+        lp = descpeaks[idescmax]
+        for j in descpeaks[idescmax:1:end] 
+            if segm[j] <= 0.2*adescmax 
+                refDADdesc = abs(j-lp) < 2*fs ? round(Int, pres[j]) : round(Int, pres[lp])
+                break 
+            end 
+            lp = j
+        end
     end
 
     return (pump = AD(refSADpump, refDADpump), desc = AD(refSADdesc, refDADdesc))
@@ -58,12 +88,11 @@ for j in 1:length(allbins)
     seg = get_valid_segments(Pres, Tone, 15, -1e7, 30*fs)
 
     # если есть таблица с реф. давлением на спуске
-    ad = AD[]
-    try
-        adtablefile = "D:/INCART/Pulse_Data/ad result tables/$basename/$(nm)_table_ad.txt"
-        ad = read_ad(adtablefile)
-    catch e
-    end
+    ad = try adtablefile = "D:/INCART/Pulse_Data/ad result tables/$basename/$(nm)_table_ad.txt"
+            ad = read_ad(adtablefile)
+        catch e
+            AD[]
+        end
 
     # ######################################################
 
@@ -86,6 +115,9 @@ for j in 1:length(allbins)
     ext = [".tone", ".pres"]
     allmkp = [tonemkp, presmkp];
 
+    try readdir("alg markup") catch e mkdir("alg markup") end
+    try readdir("alg markup/$basename") catch e mkdir("alg markup/$basename") end
+
     filename = "alg markup/$basename/$nm"
 
     for i in 1:lastindex(ext)
@@ -95,3 +127,30 @@ for j in 1:length(allbins)
     adfilename = "D:/INCART/Pulse_Data/ref AD/$basename/$nm.ad"
     save_markup(adfilename, refAD)
 end
+
+# basenm = split(dir, "/")[end]
+# nm = "MB1217211018180349"
+# binfile = "D:/INCART/Pulse_Data/все базы/$basenm/$nm"
+
+# signals, fs, timestart, units = readbin(binfile);
+
+# Pres = signals.Pres; # давление
+# Tone = signals.Tone; # пульсации
+
+# # если есть таблица с реф. давлением на спуске
+# ad = try
+#     adtablefile = "D:/INCART/Pulse_Data/ad result tables/$basenm/$(nm)_table_ad.txt"
+#     ad = read_ad(adtablefile)
+# catch e
+#     AD[]
+# end
+
+# mkp = ReadRefMkp("formatted alg markup/$basenm/$nm/1/tone.csv")
+
+# bnd = ReadRefMkp("formatted alg markup/$basenm/$nm/1/bounds.csv")
+
+# ad = AD[]
+# bounds = Bounds[]
+# push!(bounds, bnd.segm)
+# mes = refADcalc(mkp, ad, Tone, Pres, fs, bounds, 1)
+
