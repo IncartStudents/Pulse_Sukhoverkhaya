@@ -118,6 +118,7 @@ mutable struct Globals      # "Глобальные" переменные (гл�
     isguistarted::Bool
     cursorpos::Tuple{Float64, Bool}
     ECGmkp::ECGmarkup
+    movebound:: String
 
     function Globals()
         filename = ""
@@ -144,40 +145,35 @@ mutable struct Globals      # "Глобальные" переменные (гл�
         isguistarted = false
         cursorpos = (0.0, false)
         ECGmkp = ECGmarkup(Int64[], Int64[], Int64[])
+        movebound = ""
 
         new(filename, signal, markup, plotbounds, dataforplotting, 
             plotlinks, combo_item, typecombo_item, mode, 
             selected_peaks, area, pt0, plotsid, allfiles, tabledata, fold,
             selecteditem, allbases, selectedbase, isguistarted, cursorpos,
-            ECGmkp)
+            ECGmkp, movebound)
     end
 end
 
 function GeneratePlotData(v::Globals)   # Генерация новых данных для построения графиков
 
     # референтные значения САД-ДАД и рабочей зоны + границы сегмента
-    ad = v.markup.bounds.AD             # по амплитуде
-    wz = v.markup.bounds.workreg        # по амплитуде
-    vseg = v.markup.bounds.segbounds    # по отсчетам
+    ad = v.markup.bounds.AD           
+    wz = v.markup.bounds.workreg        
+    vseg = v.markup.bounds.segbounds    
 
-    # поиск границ САД-ДАД и рабочей зоны
-    pump_adbounds = get_bounds(v.signal.Pres[vseg.ibeg:vseg.iend], ad.pump, true)
-    desc_adbounds = get_bounds(v.signal.Pres[vseg.ibeg:vseg.iend], ad.desc, false)
-
-    pump_wzbounds = get_bounds(v.signal.Pres[vseg.ibeg:vseg.iend], wz.pump, true)
-    desc_wzbounds = get_bounds(v.signal.Pres[vseg.ibeg:vseg.iend], wz.desc, false)
-
-    v.plotbounds = PlotBounds((pump = pump_adbounds, desc = desc_adbounds), (pump = pump_wzbounds, desc = desc_wzbounds), vseg)
+    v.plotbounds = PlotBounds((pump = ad.pump, desc = ad.desc), (pump = wz.pump, desc = wz.desc), vseg)
 
     # ЭКГ (фильтр 0.1-45)
     ECG = v.signal.ECG[vseg.ibeg:vseg.iend]
     if length(unique(ECG)) > 1
-        ECG = my_butter(ECG, 4, 35, v.signal.fs, "low")
+        ECG = my_butter(ECG, 4, 30, v.signal.fs, "low")
         # ECG = my_butter(ECG, 4, 5, v.signal.fs, "high")
         dx0 = 2*v.signal.fs
         P, _, _, _, _, R, _, _, T, _, _ = LeadMarkup(ECG[dx0:end], v.signal.fs)
-        # dx = dx0 + 2*v.signal.fs
-        v.ECGmkp = ECGmarkup(P.+dx0, R.+dx0, T.+dx0)
+        ECG = my_butter(ECG, 4, 5, v.signal.fs, "high")
+        dx = dx0 - 4
+        v.ECGmkp = ECGmarkup(P.+dx, R.+dx, T.+dx)
     end
 
     # тоны
@@ -188,7 +184,7 @@ function GeneratePlotData(v::Globals)   # Генерация новых данн
     tone_peaks = map(x -> x.pos, v.markup.Tone)
     
     # тоны от 60 Гц
-    fftone = abs.(my_butter(seg, 4, 60, v.signal.fs, "high"))
+    fftone = my_butter(abs.(seg), 4, 60, v.signal.fs, "high")
 
     # пульсации (модуль)
     seg = v.signal.Pres[vseg.ibeg:vseg.iend]
@@ -200,14 +196,18 @@ function GeneratePlotData(v::Globals)   # Генерация новых данн
     pres_ends = map(x -> x.iend, v.markup.Pres)
 
     # расставление типов меток по умолчанию (все, что за границами рабочей зоны - в незначимые, остальные - (пока) в значимые)
-    tone_peaks_type = map(x -> x < pump_wzbounds.ibeg || (x > pump_wzbounds.iend && x < desc_wzbounds.ibeg) || x > desc_wzbounds.iend ? 0 : 1, tone_peaks)
-    pres_peaks_type = map(x -> x < pump_wzbounds.ibeg || (x > pump_wzbounds.iend && x < desc_wzbounds.ibeg) || x > desc_wzbounds.iend ? 0 : 1, pres_begs)
+    # tone_peaks_type = map(x -> x < wz.pump.iend || (x > wz.pump.ibeg && x < wz.desc.ibeg) || x > wz.desc.iend ? 0 : 1, tone_peaks)
+    # pres_peaks_type = map(x -> x < wz.pump.iend || (x > wz.pump.ibeg && x < wz.desc.ibeg) || x > wz.desc.iend ? 0 : 1, pres_begs)
+  
+    tone_peaks_type = map(x -> x.type, v.markup.Tone)
+    pres_peaks_type = map(x -> x.type, v.markup.Pres)
 
-    xmin = 0.0; xmax = length(ECG) |> Float64; ymin = minimum(ECG); ymax =  maximum(ECG)
+    dx = 4*v.signal.fs # сдвиг по х при поиске максимума, чтобы не учитывать скачек из-за фильтрации
+    xmin = 0.0; xmax = length(ECG) |> Float64; ymin = minimum(ECG[dx:end-dx]); ymax =  maximum(ECG[dx:end-dx])
     ECGtup = PlotElem(ECG, Int64[], Int64[], Int64[], ImPlotLimits(ImPlotRange(xmin, xmax),ImPlotRange(ymin, ymax)), PlotScale(xmin, xmax, ymin, ymax))
     xmin = 0.0; xmax = length(seg) |> Float64; ymin = minimum(seg); ymax =  maximum(seg)
     RawPrestup = PlotElem(seg, Int64[], Int64[], Int64[], ImPlotLimits(ImPlotRange(xmin, xmax),ImPlotRange(ymin, ymax)), PlotScale(xmin, xmax, ymin, ymax))
-    xmin = 0.0; xmax = length(pres_sig) |> Float64; ymin = minimum(pres_sig); ymax =  maximum(pres_sig)
+    xmin = 0.0; xmax = length(pres_sig) |> Float64; ymin = minimum(pres_sig[dx:end-dx]); ymax =  maximum(pres_sig[dx:end-dx])
     Prestup = PlotElem(pres_sig, pres_begs, pres_ends, pres_peaks_type, ImPlotLimits(ImPlotRange(xmin, xmax),ImPlotRange(ymin, ymax)), PlotScale(xmin, xmax, ymin, ymax))
     xmin = 0.0; xmax = length(tone_sig) |> Float64; ymin = minimum(tone_sig); ymax =  maximum(tone_sig)
     Tonetup = PlotElem(tone_sig, tone_peaks, tone_peaks, tone_peaks_type, ImPlotLimits(ImPlotRange(xmin, xmax),ImPlotRange(ymin, ymax)), PlotScale(xmin, xmax, ymin, ymax))
@@ -240,7 +240,7 @@ function ReadData(v::Globals) # Чтение данных из нового вы
     Tone_mkp = ReadRefMkp("$dir/$basename/$name/$measure/tone.csv")
     bnds = ReadRefMkp("$dir/$basename/$name/$measure/bounds.csv")
 
-    v.markup = Mkp(Pres_mkp, Tone_mkp, PlotBounds(bnds.ad, bnds.wz, bnds.segm))
+    v.markup = Mkp(Pres_mkp, Tone_mkp, PlotBounds(bnds.iad, bnds.iwz, bnds.segm))
     v.signal = Signal(ECG, Pres, Tone, fs)
 
     GeneratePlotData(v)
@@ -268,15 +268,13 @@ function SaveRefMarkupButton(v::Globals) # Кнопка сохранения и�
 
             pres_markup = map((x,y,z) -> PresGuiMkp(x, y, z), v.dataforplotting.Pres.ibegs, v.dataforplotting.Pres.iends, v.dataforplotting.Pres.type)
             tone_markup = map((x,y) -> ToneGuiMkp(x, y), v.dataforplotting.Tone.ibegs, v.dataforplotting.Tone.type)
-            ad = (pump = AD(round(Int, Pres[v.plotbounds.AD.pump.iend]), round(Int, Pres[v.plotbounds.AD.pump.ibeg])), 
-                    desc = AD(round(Int, Pres[v.plotbounds.AD.desc.ibeg]), round(Int, Pres[v.plotbounds.AD.desc.iend])))
-            wz = (pump = Bounds(round(Int, Pres[v.plotbounds.workreg.pump.iend]), round(Int, Pres[v.plotbounds.workreg.pump.ibeg])), 
-                    desc = Bounds(round(Int, Pres[v.plotbounds.workreg.desc.ibeg]), round(Int, Pres[v.plotbounds.workreg.desc.iend])))
+            ad = (pump = Bounds(v.plotbounds.AD.pump.iend, v.plotbounds.AD.pump.ibeg), desc = v.plotbounds.AD.desc)
+            wz = (pump = Bounds(v.plotbounds.workreg.pump.iend, v.plotbounds.workreg.pump.ibeg), desc = v.plotbounds.workreg.desc)
             segbounds = v.plotbounds.segbounds
 
             SaveRefMarkup("$dirname/pres.csv", pres_markup) 
             SaveRefMarkup("$dirname/tone.csv", tone_markup) 
-            SaveRefMarkup("$dirname/bounds.csv", segbounds, ad, wz) 
+            SaveRefMarkup("$dirname/bounds.csv", Pres, segbounds, ad, wz) 
 
             MakeTableData(v)
         end
@@ -388,9 +386,9 @@ function PlotLine(id, args...; label = false) # Функция рисовани�
     CImGui.PopID()
 end
 
-function Scatter(id, x, y, markerstyle, markersize, label) # Функция нанесения разметки
+function Scatter(id, x, y, markerstyle, markersize, label, color = ImPlot.GetColormapColor(id)) # Функция нанесения разметки
     CImGui.PushID(id)
-    ImPlot.SetNextMarkerStyle(markerstyle, markersize)
+    ImPlot.SetNextMarkerStyle(markerstyle, markersize, color, 0)
     if label == false ImPlot.PlotScatter(x, y)
     else ImPlot.PlotScatter(x, y, label_id = label) end
     CImGui.PopID()
@@ -532,7 +530,7 @@ function MouseClick(v::Globals, whichplot)  # Ответ на определен
         v.area = Area(ImVec2(v.pt0.x, v.pt0.y), ImVec2(pt.x, pt.y), whichplot)
     end
 
-    if ImPlot.IsPlotHovered() && CImGui.IsMouseDown(0)  # захват (для передвижения границ) (курсор наведен на любой график, левая клавиша мыши зажата)
+    if ImPlot.IsPlotHovered() && CImGui.IsMouseClicked(0) && !unsafe_load(CImGui.GetIO().KeyAlt) && !unsafe_load(CImGui.GetIO().KeyCtrl) # определение, какую из границ активируем
         pt = ImPlot.GetPlotMousePos()
         r = 0.015 * (v.plotbounds.segbounds.iend-v.plotbounds.segbounds.ibeg)
 
@@ -542,22 +540,51 @@ function MouseClick(v::Globals, whichplot)  # Ответ на определен
         wleftdesc = v.plotbounds.workreg.desc.ibeg; wrightdesc = v.plotbounds.workreg.desc.iend
 
         if abs(pt.x-wleftpump) <= r        # двигаем левую границу РЗ на накачке
-            wleftpump = round(Int, pt.x)
+            v.movebound = "wleftpump"
         elseif abs(pt.x-wleftdesc) <= r    # двигаем левую границу РЗ на спуске
-            wleftdesc = round(Int, pt.x) 
+            v.movebound = "wleftdesc"
         elseif abs(pt.x-wrightpump) <= r   # двигаем правую границу РЗ на накачке
-            wrightpump = round(Int, pt.x) 
+            v.movebound = "wrightpump"
         elseif abs(pt.x-wrightdesc) <= r   # двигаем правую границу РЗ на спуске
-            wrightdesc = round(Int, pt.x) 
+            v.movebound = "wrightdesc"
         elseif abs(pt.x-leftpump) <= r      # двигаем левую границу АД на накачке
-            leftpump = round(Int, pt.x)
+            v.movebound = "leftpump"
         elseif abs(pt.x-leftdesc) <= r      # двигаем левую границу АД на спуске
-            leftdesc = round(Int, pt.x)
+            v.movebound = "leftdesc"
         elseif abs(pt.x-rightpump) <= r     # двигаем правую границу АД на накачке
-            rightpump = round(Int, pt.x)
+            v.movebound = "rightpump"
         elseif abs(pt.x-rightdesc) <= r     # двигаем правую границу АД на спуске
+            v.movebound = "rightdesc"
+        else
+            v.movebound = ""
+        end
+    end
+    if ImPlot.IsPlotHovered() && CImGui.IsMouseDown(0) && !unsafe_load(CImGui.GetIO().KeyAlt) && !unsafe_load(CImGui.GetIO().KeyCtrl) # захват (для передвижения границ) (курсор наведен на любой график, левая клавиша мыши зажата)
+        pt = ImPlot.GetPlotMousePos()
+
+        leftpump = v.plotbounds.AD.pump.ibeg; rightpump = v.plotbounds.AD.pump.iend
+        leftdesc = v.plotbounds.AD.desc.ibeg; rightdesc = v.plotbounds.AD.desc.iend
+        wleftpump = v.plotbounds.workreg.pump.ibeg; wrightpump = v.plotbounds.workreg.pump.iend
+        wleftdesc = v.plotbounds.workreg.desc.ibeg; wrightdesc = v.plotbounds.workreg.desc.iend
+
+        if v.movebound == "wleftpump"       # двигаем левую границу РЗ на накачке
+            wleftpump = round(Int, pt.x)
+        elseif v.movebound == "wleftdesc"   # двигаем левую границу РЗ на спуске
+            wleftdesc = round(Int, pt.x) 
+        elseif v.movebound == "wrightpump"   # двигаем правую границу РЗ на накачке
+            wrightpump = round(Int, pt.x) 
+        elseif v.movebound == "wrightdesc"   # двигаем правую границу РЗ на спуске
+            wrightdesc = round(Int, pt.x) 
+        elseif v.movebound == "leftpump"      # двигаем левую границу АД на накачке
+            leftpump = round(Int, pt.x)
+        elseif v.movebound == "leftdesc"      # двигаем левую границу АД на спуске
+            leftdesc = round(Int, pt.x)
+        elseif v.movebound == "rightpump"     # двигаем правую границу АД на накачке
+            rightpump = round(Int, pt.x)
+        elseif v.movebound == "rightdesc"     # двигаем правую границу АД на спуске
             rightdesc = round(Int, pt.x)
         end
+
         v.plotbounds.workreg = (pump = Bounds(wleftpump, wrightpump), desc = Bounds(wleftdesc, wrightdesc))
         v.plotbounds.AD = (pump = Bounds(leftpump, rightpump), desc = Bounds(leftdesc, rightdesc))
 
@@ -602,13 +629,13 @@ function BoundsFields(v::Globals) # Поля ввода и отображени�
 
     sig = v.dataforplotting.rawPres.sig
 
-    idadpump = v.plotbounds.AD.pump.ibeg
-    isadpump = v.plotbounds.AD.pump.iend
+    isadpump = v.plotbounds.AD.pump.ibeg
+    idadpump = v.plotbounds.AD.pump.iend
     isaddesc = v.plotbounds.AD.desc.ibeg
     idaddesc = v.plotbounds.AD.desc.iend
 
-    iwendpump = v.plotbounds.workreg.pump.ibeg
-    iwbegpump = v.plotbounds.workreg.pump.iend
+    iwbegpump = v.plotbounds.workreg.pump.ibeg
+    iwendpump = v.plotbounds.workreg.pump.iend
     iwbegdesc = v.plotbounds.workreg.desc.ibeg
     iwenddesc = v.plotbounds.workreg.desc.iend
 
@@ -634,8 +661,8 @@ function BoundsFields(v::Globals) # Поля ввода и отображени�
     iwbegdesc = BoundsInput("##WBEGdesc", 345, sig, iwbegdesc, false)
     iwenddesc = BoundsInput("##WENDdesc", 420, sig, iwenddesc, false)
 
-    v.plotbounds.AD = (pump = Bounds(idadpump, isadpump), desc = Bounds(isaddesc, idaddesc))
-    v.plotbounds.workreg = (pump = Bounds(iwendpump, iwbegpump), desc = Bounds(iwbegdesc, iwenddesc))
+    v.plotbounds.AD = (pump = Bounds(isadpump, idadpump), desc = Bounds(isaddesc, idaddesc))
+    v.plotbounds.workreg = (pump = Bounds(iwbegpump, iwendpump), desc = Bounds(iwbegdesc, iwenddesc))
 end
 
 function ChangeTypeCombo(v::Globals) # Выпадающий список типов меток
@@ -710,8 +737,8 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
         if CImGui.Button("Вернуть исходный масштаб") ReturnScale(v) end
         SaveRefMarkupButton(v)
 
-        ImPlot.PushColormap(ImPlotColormap_Deep)
-        flags = CImGui.IsMouseDown(0) ? ImGuiCond_Always : ImGuiCond_Once
+        # ImPlot.PushColormap(ImPlotColormap_Deep)
+        flags = CImGui.IsMouseDown(0) && !isempty(v.movebound) || unsafe_load(CImGui.GetIO().KeyAlt) ? ImGuiCond_Always : ImGuiCond_Once
 
         if length(unique(v.signal.ECG)) > 2
             CImGui.PushID(v.plotsid.ECG)
@@ -743,13 +770,14 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
 
                     if v.cursorpos[2] == true PlotLine(6, [v.cursorpos[1], v.cursorpos[1]], [ymin, ymax]) end
 
+                    color = ImVec4(1,0,0,1)
                     # P = filter(x -> x <= length(sig), v.ECGmkp.P)
                     R = filter(x -> x <= length(sig), v.ECGmkp.R)
                     # T = filter(x -> x <= length(sig), v.ECGmkp.T)
 
-                    Scatter(7, P, sig[P], ImPlotMarker_Circle, 5, "P")
-                    Scatter(8, R, sig[R], ImPlotMarker_Circle, 5, "R")
-                    Scatter(9, T, sig[T], ImPlotMarker_Circle, 5, "T")
+                    # Scatter(7, P, sig[P], ImPlotMarker_Circle, 5, "P")
+                    Scatter(8, R, sig[R], ImPlotMarker_Circle, 2, "R", color)
+                    # Scatter(9, T, sig[T], ImPlotMarker_Circle, 5, "T")
 
                     currlims = ImPlot.GetPlotLimits()
                     v.dataforplotting.ECG.scale = PlotScale(currlims.X.Min, currlims.X.Max, currlims.Y.Min, currlims.Y.Max)
@@ -834,18 +862,21 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
                 if v.cursorpos[2] == true PlotLine(6, [v.cursorpos[1], v.cursorpos[1]], [ymin, ymax]) end
 
                 if !isempty(begs1)
-                    Scatter(7, begs1, sig[begs1], ImPlotMarker_Circle, 5, "Значимые")
-                    Scatter(7, ends1, sig[ends1], ImPlotMarker_Square, 5, "Значимые")
+                    color = ImVec4(0,0.5,0,1)
+                    Scatter(7, begs1, sig[begs1], ImPlotMarker_Circle, 5, "Значимые", color)
+                    Scatter(7, ends1, sig[ends1], ImPlotMarker_Square, 5, "Значимые", color)
                 end
 
                 if !isempty(begs0)
-                    Scatter(8, begs0, sig[begs0], ImPlotMarker_Circle, 5, "Незначимые")
-                    Scatter(8, ends0, sig[ends0], ImPlotMarker_Square, 5, "Незначимые")
+                    color = ImVec4(0.5,0.5,0,1)
+                    Scatter(8, begs0, sig[begs0], ImPlotMarker_Circle, 5, "Незначимые", color)
+                    Scatter(8, ends0, sig[ends0], ImPlotMarker_Square, 5, "Незначимые", color)
                 end
 
                 if !isempty(begs2)
-                    Scatter(9, begs2, sig[begs2], ImPlotMarker_Circle, 5, "Шум")
-                    Scatter(9, ends2, sig[ends2], ImPlotMarker_Square, 5, "Шум")
+                    color = ImVec4(0.7,0,0,1)
+                    Scatter(9, begs2, sig[begs2], ImPlotMarker_Circle, 5, "Шум", color)
+                    Scatter(9, ends2, sig[ends2], ImPlotMarker_Square, 5, "Шум", color)
                 end
 
                 if v.area.whichplot == "pulse"
@@ -900,19 +931,18 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
                 if v.cursorpos[2] == true PlotLine(6, [v.cursorpos[1], v.cursorpos[1]], [ymin, ymax]) end
 
                 if !isempty(peaks1)
-                    Scatter(7, peaks1, sig[peaks1], ImPlotMarker_Circle, 5, "Значимые")
+                    color = ImVec4(0,0.5,0,1)
+                    Scatter(7, peaks1, sig[peaks1], ImPlotMarker_Circle, 5, "Значимые", color)
                 end
 
                 if !isempty(peaks0)
-                    Scatter(8, peaks0, sig[peaks0], ImPlotMarker_Circle, 5, "Незначимые")
+                    color = ImVec4(0.5,0.5,0,1)
+                    Scatter(8, peaks0, sig[peaks0], ImPlotMarker_Circle, 5, "Незначимые", color)
                 end
 
                 if !isempty(peaks2)
-                    Scatter(9, peaks2, sig[peaks2], ImPlotMarker_Circle, 5, "Шум")
-                end
-
-                if !isempty(v.selected_peaks) 
-                    Scatter(10, v.selected_peaks, sig[v.selected_peaks], ImPlotMarker_Circle, 5, false)
+                    color = ImVec4(0.7,0,0,1)
+                    Scatter(9, peaks2, sig[peaks2], ImPlotMarker_Circle, 5, "Шум", color)
                 end
 
                 currlims = ImPlot.GetPlotLimits()
@@ -934,7 +964,7 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
             end
         CImGui.PopID()
 
-        ImPlot.PopColormap()
+        # ImPlot.PopColormap()
         
         CImGui.End()
     end

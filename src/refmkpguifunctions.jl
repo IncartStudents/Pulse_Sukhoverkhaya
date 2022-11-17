@@ -16,8 +16,8 @@ end
 
 
 function get_workzone_bounds(seg::Vector{Float64})
-    lvlbeg_desc = round(maximum(seg) - 30) |> Int64; lvlend_desc = seg[end] >= 30 ? Int64(round(seg[end]))+10 : 30
-    lvlbeg_pump = round(maximum(seg) - 30) |> Int64; lvlend_pump = seg[1] >= 30 ? Int64(round(seg[1]))+10 : 30
+    lvlbeg_desc = round(maximum(seg) - 10) |> Int64; lvlend_desc = seg[end] >= 10 ? Int64(round(seg[end]))+10 : 10
+    lvlbeg_pump = round(maximum(seg) - 10) |> Int64; lvlend_pump = seg[1] >= 10 ? Int64(round(seg[1]))+10 : 10
     
     return (pump = Bounds(lvlbeg_pump, lvlend_pump), desc = Bounds(lvlbeg_desc, lvlend_desc))
 end
@@ -46,25 +46,25 @@ function SaveRefMarkup(filename::String, markup::Vector{ToneGuiMkp}) # Сохр�
     end
 end
 
-function SaveRefMarkup(filename::String, segbounds::Bounds, ad::NamedTuple{(:pump, :desc), Tuple{AD, AD}}, wr::NamedTuple{(:pump, :desc), Tuple{Bounds, Bounds}}) # Сохранение границ сегмента, рабочей зоны и АД
+function SaveRefMarkup(filename::String, Presseg::Vector{Float64}, segbounds::Bounds, ad::NamedTuple{(:pump, :desc), Tuple{Bounds, Bounds}}, wr::NamedTuple{(:pump, :desc), Tuple{Bounds, Bounds}}) # Сохранение границ сегмента, рабочей зоны и АД
     
     ibeg = segbounds.ibeg
     iend = segbounds.iend
     
-    Asadpump = ad.pump.SAD
-    Adadpump = ad.pump.DAD
-    Asaddesc = ad.desc.SAD
-    Adaddesc = ad.desc.DAD
+    isadpump = ad.pump.ibeg; Asadpump = round(Int, Presseg[isadpump])
+    idadpump = ad.pump.iend; Adadpump = round(Int, Presseg[idadpump])
+    isaddesc = ad.desc.ibeg; Asaddesc = round(Int, Presseg[isaddesc])
+    idaddesc = ad.desc.iend; Adaddesc = round(Int, Presseg[idaddesc])
 
-    Awbegpump = wr.pump.ibeg
-    Awendpump = wr.pump.iend
-    Awbegdesc = wr.desc.ibeg
-    Awenddesc = wr.desc.iend
+    iwbegpump = wr.pump.ibeg; Awbegpump = round(Int, Presseg[iwbegpump])
+    iwendpump = wr.pump.iend; Awendpump = round(Int, Presseg[iwendpump])
+    iwbegdesc = wr.desc.ibeg; Awbegdesc = round(Int, Presseg[iwbegdesc])
+    iwenddesc = wr.desc.iend; Awenddesc = round(Int, Presseg[iwenddesc])
 
     open(filename, "w") do io
-        write(io, "       segmbegpos   segmendpos   ADamp   DADamp   WRhigh   WRlow")
-        write(io, "\npump   $ibeg   $iend   $Asadpump   $Adadpump   $Awbegpump   $Awendpump")
-        write(io, "\ndesc   $ibeg   $iend   $Asaddesc   $Adaddesc   $Awbegdesc   $Awenddesc")
+        write(io, "       segmbegpos   segmendpos   iSAD   ADamp   iDAD   DADamp   iWRh   WRh   iWRl   WRl")
+        write(io, "\npump   $ibeg   $iend   $idadpump   $Adadpump   $isadpump   $Asadpump   $iwendpump   $Awendpump   $iwbegpump   $Awbegpump")
+        write(io, "\ndesc   $ibeg   $iend   $isaddesc   $Asaddesc   $idaddesc   $Adaddesc   $iwbegdesc   $Awbegdesc   $iwenddesc   $Awenddesc")
     end
 
 end
@@ -76,6 +76,7 @@ function ReadRefMkp(filename::String)
     if key == :bounds 
         bnds = (pump = Bounds(0,0), desc = Bounds(0,0)) 
         markup = (ad = bnds, wz = bnds, segm = Bounds(0,0))
+        iad = fill(Bounds(0,0), 2); iwz = fill(Bounds(0,0), 2)
         ad = fill(Bounds(0,0), 2); wz = fill(Bounds(0,0), 2)
         sb = Bounds(0,0)
     elseif key == :pres markup = PresGuiMkp[]
@@ -96,15 +97,19 @@ function ReadRefMkp(filename::String)
                 elseif key == :tone push!(markup, ToneGuiMkp(vars[1], vars[2]))
                 elseif key == :bounds 
                     sb = Bounds(vars[1], vars[2])
-                    ad[k] = Bounds(vars[3], vars[4])
-                    wz[k] = Bounds(vars[5], vars[6])
+                    iad[k] = Bounds(vars[3], vars[5])
+                    iwz[k] = Bounds(vars[7], vars[9])
+                    ad[k] = Bounds(vars[4], vars[6])
+                    wz[k] = Bounds(vars[8], vars[10])
                 end
             end
             needwrite = true
             k += 1
         end
         if key == :bounds
-            markup = (ad = (pump = ad[1], desc = ad[2]), wz = (pump = wz[1], desc = wz[2]), segm = sb)
+            markup = (iad = (pump = iad[1], desc = iad[2]), iwz = (pump = iwz[1], desc = iwz[2]), 
+                        ad = (pump = ad[1], desc = ad[2]), wz = (pump = wz[1], desc = wz[2]), 
+                        segm = sb)
         end
     end
 
