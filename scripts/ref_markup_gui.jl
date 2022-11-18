@@ -22,14 +22,14 @@ include("../ECG markup/onelead.jl")
 # include(joinpath(pathof(ImPlot), "..", "..", "demo", "implot_demo.jl"))
 # show_demo()
 
-struct Signal    # Нужные каналы и частота дискретизации, вытянутые из бинаря + границы валидных сегментов
+struct Signal    # Нужные каналы и частота дискретизации, вытянутые из бинаря
     ECG::Vector{Float64}
     Pres::Vector{Float64}
     Tone::Vector{Float64}
     fs::Int64
 end
 
-mutable struct PlotBounds   # Данные границ сегмента, рабочей зоны и АД ( рз и ад - на накачке и на спуске)
+mutable struct PlotBounds   # Данные границ сегмента, рабочей зоны и АД (рз и ад - на накачке и на спуске)
     AD::NamedTuple{(:pump, :desc), NTuple{2, Bounds}}
     workreg::NamedTuple{(:pump, :desc), NTuple{2, Bounds}}
     segbounds::Bounds
@@ -53,7 +53,7 @@ struct Area      # Границы нарисованной прямогольн�
     whichplot::String
 end 
 
-mutable struct PlotScale
+mutable struct PlotScale   # Масштаб гранифика
     xmin::Float64
     xmax::Float64
     ymin::Float64
@@ -95,33 +95,30 @@ mutable struct PlotID       # ID каждого графика
     Tone::Int64
 end
 
-mutable struct Globals      # "Глобальные" переменные (главная структура)
-    filename::String
-    signal::Signal
-    markup::Mkp
-    plotbounds::PlotBounds
-    dataforplotting::PlotData
-    plotlinks::PlotLinks
-    combo_item::Int64
-    typecombo_item::Int64
-    mode::Int64
-    selected_peaks::Vector{Int64}
-    area::Area
-    pt0::ImVec2
-    plotsid::PlotID
-    allfiles::Vector{String}
-    tabledata::Vector{Tuple}
-    fold::String
-    selecteditem::Int64
-    allbases::Vector{String}
-    selectedbase::Int64
-    isguistarted::Bool
-    cursorpos::Tuple{Float64, Bool}
-    ECGmkp::ECGmarkup
-    movebound:: String
+mutable struct Globals              # "Глобальные" переменные (главная структура)
+    signal::Signal                  # Сырые сигналы, взятые из бинаря
+    markup::Mkp                     # Тестовая разметка
+    plotbounds::PlotBounds          # Границы сегмента, рабочих зон и АД для обозначения на графиках
+    dataforplotting::PlotData       # Данные для изображения на графиках
+    plotlinks::PlotLinks            # Для синхронизации матштабов графиков по оси абсцисс
+    fname::Int64                    # Выбранная строка с именем файла базы из таблицы
+    typefname::Int64                 
+    mode::Int64                     # Режим работы (выбираются радиокнопкой)
+    area::Area                      # Выбраная прямоугольная область
+    pt0::ImVec2                     # Точка начала рисования области
+    plotsid::PlotID                 # id-шники графиков (потому что ImCond_Once применяется к графику с одним айдишиком единожды)
+    allfiles::Vector{String}        # Имена всех файлов базы
+    tabledata::Vector{Tuple}        # Данные для таблицы с изменениями и САД ДАД для выбранного файла
+    fold::String                    # Папка с базой
+    selecteditem::Int64             # Номер выбранного из таблицы измерения
+    allbases::Vector{String}        # Имена всех баз
+    selectedbase::Int64             # Номер выбранной из таблицы базы
+    isguistarted::Bool              # Флаг запуска гуи
+    cursorpos::Tuple{Float64, Bool}  # Текущая позиция курсора
+    ECGmkp::ECGmarkup               # Разметка ЭКГ
+    movebound::String               # Индикатор, какая из 4-х вертикальных границ на графике захвачена для перемещения
 
     function Globals()
-        filename = ""
         signal = Signal(Float64[], Float64[], Float64[], 0)
         bnds0 = Bounds(0,0)
         plotbounds = PlotBounds((pump = bnds0, desc = bnds0), (pump = bnds0, desc = bnds0), bnds0)
@@ -129,10 +126,9 @@ mutable struct Globals      # "Глобальные" переменные (гл�
         tup = PlotElem(Float64[], Int64[], Int64[], Int64[], ImPlotLimits(ImPlotRange(0.0,0.0), ImPlotRange(0.0,0.0)), PlotScale(0.0,0.0,0.0,0.0))
         dataforplotting = PlotData(tup, tup, tup, tup, Float64[])
         plotlinks = PlotLinks(Ref(0.0), Ref(1.0), Ref(0.0), Ref(1.0), true, false)
-        combo_item = 1
-        typecombo_item = 1
+        fname = 1
+        typefname = 1
         mode = 0
-        selected_peaks = Int64[]
         area = Area(ImVec2(0.0,0.0), ImVec2(0.0,0.0), "")
         pt0 = ImVec2(0.0,0.0)
         plotsid = PlotID(-2,-1,1,2)
@@ -147,9 +143,9 @@ mutable struct Globals      # "Глобальные" переменные (гл�
         ECGmkp = ECGmarkup(Int64[], Int64[], Int64[])
         movebound = ""
 
-        new(filename, signal, markup, plotbounds, dataforplotting, 
-            plotlinks, combo_item, typecombo_item, mode, 
-            selected_peaks, area, pt0, plotsid, allfiles, tabledata, fold,
+        new(signal, markup, plotbounds, dataforplotting, 
+            plotlinks, fname, typefname, mode, 
+            area, pt0, plotsid, allfiles, tabledata, fold,
             selecteditem, allbases, selectedbase, isguistarted, cursorpos,
             ECGmkp, movebound)
     end
@@ -195,10 +191,6 @@ function GeneratePlotData(v::Globals)   # Генерация новых данн
     pres_begs = map(x -> x.ibeg, v.markup.Pres)
     pres_ends = map(x -> x.iend, v.markup.Pres)
 
-    # расставление типов меток по умолчанию (все, что за границами рабочей зоны - в незначимые, остальные - (пока) в значимые)
-    # tone_peaks_type = map(x -> x < wz.pump.iend || (x > wz.pump.ibeg && x < wz.desc.ibeg) || x > wz.desc.iend ? 0 : 1, tone_peaks)
-    # pres_peaks_type = map(x -> x < wz.pump.iend || (x > wz.pump.ibeg && x < wz.desc.ibeg) || x > wz.desc.iend ? 0 : 1, pres_begs)
-  
     tone_peaks_type = map(x -> x.type, v.markup.Tone)
     pres_peaks_type = map(x -> x.type, v.markup.Pres)
 
@@ -219,7 +211,7 @@ end
 function ReadData(v::Globals) # Чтение данных из нового выбранного файла
 
     # чтение сигнала из бинаря
-    signals, fs, _, _ = readbin(v.fold*"/"*v.allfiles[v.combo_item])
+    signals, fs, _, _ = readbin(v.fold*"/"*v.allfiles[v.fname])
 
     ECG = signals[1]     # ЭКГ
     Tone = signals.Tone  # пульсации
@@ -230,7 +222,7 @@ function ReadData(v::Globals) # Чтение данных из нового вы
     srcdir = "formatted alg markup"
     dstdir = "ref markup"
     basename = split(v.fold, "/")[end]
-    name = v.allfiles[v.combo_item]
+    name = v.allfiles[v.fname]
     measure = v.selecteditem
 
     dir = try readdir("$dstdir/$basename/$name/$measure"); dstdir catch e srcdir end
@@ -257,10 +249,10 @@ function SaveRefMarkupButton(v::Globals) # Кнопка сохранения и�
             dirname0 = "ref markup/$basename"
             try readdir(dirname0)
             catch e mkdir(dirname0) end
-            dirname0 = "ref markup/$basename/$(v.allfiles[v.combo_item])"
+            dirname0 = "ref markup/$basename/$(v.allfiles[v.fname])"
             try readdir(dirname0)
             catch e mkdir(dirname0) end
-            dirname = "ref markup/$basename/$(v.allfiles[v.combo_item])/$(v.tabledata[v.selecteditem][1][2])"
+            dirname = "ref markup/$basename/$(v.allfiles[v.fname])/$(v.tabledata[v.selecteditem][1][2])"
             try readdir(dirname)
             catch e mkdir(dirname) end
 
@@ -281,7 +273,7 @@ function SaveRefMarkupButton(v::Globals) # Кнопка сохранения и�
     end
 end
 
-function FilenamesTable(v::Globals)
+function FilenamesTable(v::Globals)   # Таблица имен файлов базы
     if !isempty(v.allfiles)
         CImGui.NewLine()
         CImGui.BeginChild("##filenames_header", ImVec2(CImGui.GetWindowContentRegionWidth(), CImGui.GetTextLineHeightWithSpacing()*1.3))
@@ -296,8 +288,8 @@ function FilenamesTable(v::Globals)
         CImGui.Columns(1, "Имена файлов")
         for i in 1:lastindex(v.allfiles)
             CImGui.PushID(i)
-            if CImGui.Selectable(v.allfiles[i], i == v.combo_item)
-                v.combo_item = i
+            if CImGui.Selectable(v.allfiles[i], i == v.fname)
+                v.fname = i
                 v.selecteditem = 1
                 ReadData(v)
                 MakeTableData(v) 
@@ -318,7 +310,7 @@ function MakeTableData(v::Globals) # чтение реф границ АД дл�
     dir0 = "ref markup"
     dir = "formatted alg markup"
     basename = split(v.fold, "/")[end]
-    name = v.allfiles[v.combo_item]
+    name = v.allfiles[v.fname]
     allmesfiles = readdir("$dir/$basename/$name")
     v.tabledata = fill(("Номер измерения" => 0, "САД реф." => 0, "ДАД реф." => 0), length(allmesfiles))
     for i in 1:lastindex(allmesfiles)
@@ -421,7 +413,7 @@ function InsideArea(v::Globals, whichplot)  # Действия с точками
                         ymin = ymin, ymax = ymax)
 
         if v.mode == 3 # ретипизация меток в области
-            newalltypes = map((x,y) -> isin(ImVec2(x,sig[x]), searchbox) ? (v.typecombo_item-1) : y, allbegs, alltypes)
+            newalltypes = map((x,y) -> isin(ImVec2(x,sig[x]), searchbox) ? (v.typefname-1) : y, allbegs, alltypes)
             if whichplot == "tone" v.dataforplotting.Tone.type = newalltypes
             elseif whichplot == "pulse" v.dataforplotting.Pres.type = newalltypes end
         elseif v.mode == 4  # удаление меток в области
@@ -474,7 +466,7 @@ function MouseClick(v::Globals, whichplot)  # Ответ на определен
             for i in allbegs
                 if isin(ImVec2(i, sig[i]), searchbox) # если выбрана существующая метка - ретипизируем
                     ind = findfirst(x -> x==i, allbegs)
-                    alltypes[ind] = v.typecombo_item - 1
+                    alltypes[ind] = v.typefname - 1
                     if whichplot == "tone"
                         v.dataforplotting.Tone.ibegs = allbegs
                         v.dataforplotting.Tone.iends = allends
@@ -488,7 +480,7 @@ function MouseClick(v::Globals, whichplot)  # Ответ на определен
                 end
             end
             if !retyped && whichplot == "tone" # в противном случае устанавливаем новую метку
-                push!(allbegs, newpeak); push!(alltypes, v.typecombo_item-1)
+                push!(allbegs, newpeak); push!(alltypes, v.typefname-1)
                 v.dataforplotting.Tone.ibegs = allbegs
                 v.dataforplotting.Tone.iends = allbegs
                 v.dataforplotting.Tone.type = alltypes
@@ -669,10 +661,10 @@ function ChangeTypeCombo(v::Globals) # Выпадающий список тип�
     CImGui.SameLine(970)
     CImGui.SetNextItemWidth(420)
     types = ["Незначимая","Значимая","Шум"]
-    if CImGui.BeginCombo("##type", types[v.typecombo_item])
+    if CImGui.BeginCombo("##type", types[v.typefname])
         for i in 1:lastindex(types)
-            if CImGui.Selectable(string(types[i]), types[i] == types[v.typecombo_item]) 
-                v.typecombo_item = i 
+            if CImGui.Selectable(string(types[i]), types[i] == types[v.typefname]) 
+                v.typefname = i 
             end
         end
         CImGui.EndCombo()
@@ -996,7 +988,7 @@ function BasesTable(v::Globals)
             CImGui.PushID(i)
             if CImGui.Selectable(allbases[i], i == v.selectedbase)
                 v.selectedbase = i
-                v.combo_item = 1
+                v.fname = 1
                 v.selecteditem = 1
                 v.fold = v.allbases[i]
                 ReadBase(v)
