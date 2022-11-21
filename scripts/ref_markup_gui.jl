@@ -151,50 +151,50 @@ mutable struct Globals              # "Глобальные" переменны�
     end
 end
 
-function GeneratePlotData(v::Globals)   # Генерация новых данных для построения графиков
+function GeneratePlotData(bounds, signal, markup, ECGmkp)   # Генерация новых данных для построения графиков
 
     # референтные значения САД-ДАД и рабочей зоны + границы сегмента
-    ad = v.markup.bounds.AD           
-    wz = v.markup.bounds.workreg        
-    vseg = v.markup.bounds.segbounds    
+    ad = bounds.AD           
+    wz = bounds.workreg        
+    vseg = bounds.segbounds    
 
-    v.plotbounds = PlotBounds((pump = ad.pump, desc = ad.desc), (pump = wz.pump, desc = wz.desc), vseg)
+    plotbounds = PlotBounds((pump = ad.pump, desc = ad.desc), (pump = wz.pump, desc = wz.desc), vseg)
 
     # ЭКГ (фильтр 0.1-45)
-    ECG = v.signal.ECG[vseg.ibeg:vseg.iend]
+    ECG = signal.ECG[vseg.ibeg:vseg.iend]
     if length(unique(ECG)) > 1
-        ECG = my_butter(ECG, 4, 30, v.signal.fs, "low")
+        ECG = my_butter(ECG, 4, 30, signal.fs, "low")
         # ECG = my_butter(ECG, 4, 5, v.signal.fs, "high")
-        dx0 = 2*v.signal.fs
-        P, _, _, _, _, R, _, _, T, _, _ = LeadMarkup(ECG[dx0:end], v.signal.fs)
-        ECG = my_butter(ECG, 4, 5, v.signal.fs, "high")
+        dx0 = 2*signal.fs
+        P, _, _, _, _, R, _, _, T, _, _ = LeadMarkup(ECG[dx0:end], signal.fs)
+        ECG = my_butter(ECG, 4, 5, signal.fs, "high")
         dx = dx0 - 4
-        v.ECGmkp = ECGmarkup(P.+dx, R.+dx, T.+dx)
+        ECGmkp = ECGmarkup(P.+dx, R.+dx, T.+dx)
     end
 
     # тоны
-    seg = v.signal.Tone[vseg.ibeg:vseg.iend]
+    seg = signal.Tone[vseg.ibeg:vseg.iend]
 
-    tone_sig = my_butter(abs.(seg), 2, 10, v.signal.fs, "low")    # огибающая по модулю
+    tone_sig = my_butter(abs.(seg), 2, 10, signal.fs, "low")    # огибающая по модулю
 
-    tone_peaks = map(x -> x.pos, v.markup.Tone)
+    tone_peaks = map(x -> x.pos, markup.Tone)
     
     # тоны от 60 Гц
-    fftone = my_butter(abs.(seg), 4, 60, v.signal.fs, "high")
+    fftone = my_butter(abs.(seg), 4, 60, signal.fs, "high")
 
     # пульсации (модуль)
-    seg = v.signal.Pres[vseg.ibeg:vseg.iend]
+    seg = signal.Pres[vseg.ibeg:vseg.iend]
 
-    fsig_smooth = my_butter(seg, 2, 10, v.signal.fs, "low")         # сглаживание
-    pres_sig = my_butter(fsig_smooth, 2, 0.3, v.signal.fs, "high")  # устранение постоянной составляющей
+    fsig_smooth = my_butter(seg, 2, 10, signal.fs, "low")         # сглаживание
+    pres_sig = my_butter(fsig_smooth, 2, 0.3, signal.fs, "high")  # устранение постоянной составляющей
 
-    pres_begs = map(x -> x.ibeg, v.markup.Pres)
-    pres_ends = map(x -> x.iend, v.markup.Pres)
+    pres_begs = map(x -> x.ibeg, markup.Pres)
+    pres_ends = map(x -> x.iend, markup.Pres)
 
-    tone_peaks_type = map(x -> x.type, v.markup.Tone)
-    pres_peaks_type = map(x -> x.type, v.markup.Pres)
+    tone_peaks_type = map(x -> x.type, markup.Tone)
+    pres_peaks_type = map(x -> x.type, markup.Pres)
 
-    dx = 4*v.signal.fs # сдвиг по х при поиске максимума, чтобы не учитывать скачек из-за фильтрации
+    dx = 4*signal.fs # сдвиг по х при поиске максимума, чтобы не учитывать скачек из-за фильтрации
     xmin = 0.0; xmax = length(ECG) |> Float64; ymin = minimum(ECG[dx:end-dx]); ymax =  maximum(ECG[dx:end-dx])
     ECGtup = PlotElem(ECG, Int64[], Int64[], Int64[], ImPlotLimits(ImPlotRange(xmin, xmax),ImPlotRange(ymin, ymax)), PlotScale(xmin, xmax, ymin, ymax))
     xmin = 0.0; xmax = length(seg) |> Float64; ymin = minimum(seg); ymax =  maximum(seg)
@@ -204,14 +204,15 @@ function GeneratePlotData(v::Globals)   # Генерация новых данн
     xmin = 0.0; xmax = length(tone_sig) |> Float64; ymin = minimum(tone_sig); ymax =  maximum(tone_sig)
     Tonetup = PlotElem(tone_sig, tone_peaks, tone_peaks, tone_peaks_type, ImPlotLimits(ImPlotRange(xmin, xmax),ImPlotRange(ymin, ymax)), PlotScale(xmin, xmax, ymin, ymax))
 
-    v.dataforplotting = PlotData(ECGtup, RawPrestup, Prestup, Tonetup, fftone)
-    ReturnScale(v)
+    dataforplotting = PlotData(ECGtup, RawPrestup, Prestup, Tonetup, fftone)
+
+    return plotbounds, dataforplotting, ECGmkp
 end
 
-function ReadData(v::Globals) # Чтение данных из нового выбранного файла
+function ReadData(folder::String, name, measure::Int) # Чтение данных из нового выбранного файла
 
     # чтение сигнала из бинаря
-    signals, fs, _, _ = readbin(v.fold*"/"*v.allfiles[v.fname])
+    signals, fs, _, _ = readbin(folder*"/"*name)
 
     ECG = signals[1]     # ЭКГ
     Tone = signals.Tone  # пульсации
@@ -221,9 +222,7 @@ function ReadData(v::Globals) # Чтение данных из нового вы
     # если есть - зачитываем сразу 
     srcdir = "formatted alg markup"
     dstdir = "ref markup"
-    basename = split(v.fold, "/")[end]
-    name = v.allfiles[v.fname]
-    measure = v.selecteditem
+    basename = split(folder, "/")[end]
 
     dir = try readdir("$dstdir/$basename/$name/$measure"); dstdir catch e srcdir end
 
@@ -232,10 +231,10 @@ function ReadData(v::Globals) # Чтение данных из нового вы
     Tone_mkp = ReadRefMkp("$dir/$basename/$name/$measure/tone.csv")
     bnds = ReadRefMkp("$dir/$basename/$name/$measure/bounds.csv")
 
-    v.markup = Mkp(Pres_mkp, Tone_mkp, PlotBounds(bnds.iad, bnds.iwz, bnds.segm))
-    v.signal = Signal(ECG, Pres, Tone, fs)
+    markup = Mkp(Pres_mkp, Tone_mkp, PlotBounds(bnds.iad, bnds.iwz, bnds.segm))
+    signal = Signal(ECG, Pres, Tone, fs)
 
-    GeneratePlotData(v)
+    return markup, signal
 end
 
 function SaveRefMarkupButton(v::Globals) # Кнопка сохранения исправленной референтной разметки тонов и пульсаций + границ сегмента, рабочей зоны и АД для текущего измерения выбранного файла
@@ -268,7 +267,7 @@ function SaveRefMarkupButton(v::Globals) # Кнопка сохранения и�
             SaveRefMarkup("$dirname/tone.csv", tone_markup) 
             SaveRefMarkup("$dirname/bounds.csv", Pres, segbounds, ad, wz) 
 
-            MakeTableData(v)
+            v.tabledata = MakeTableData(v.fold, v.allfiles[v.fname]) 
         end
     end
 end
@@ -291,10 +290,10 @@ function FilenamesTable(v::Globals)   # Таблица имен файлов б�
             if CImGui.Selectable(v.allfiles[i], i == v.fname)
                 v.fname = i
                 v.selecteditem = 1
-                ReadData(v)
-                MakeTableData(v) 
-                GeneratePlotData(v)
-                ChangePlotsID(v)
+                v.markup, v.signal = ReadData(v.fold, v.allfiles[v.fname], v.selecteditem)
+                v.tabledata = MakeTableData(v.fold, v.allfiles[v.fname]) 
+                v.plotbounds, v.dataforplotting, v.ECGmkp = GeneratePlotData(v.markup.bounds, v.signal, v.markup, v.ECGmkp)
+                v.plotsid, v.dataforplotting = ReturnScale(v.plotsid, v.dataforplotting)
             end
             CImGui.PopID()
             CImGui.NextColumn()
@@ -306,23 +305,24 @@ function FilenamesTable(v::Globals)   # Таблица имен файлов б�
     end
 end
 
-function MakeTableData(v::Globals) # чтение реф границ АД для всех измерений в файле
+function MakeTableData(folder::String, name::String) # чтение реф границ АД для всех измерений в файле
     dir0 = "ref markup"
     dir = "formatted alg markup"
-    basename = split(v.fold, "/")[end]
-    name = v.allfiles[v.fname]
+    basename = split(folder, "/")[end]
     allmesfiles = readdir("$dir/$basename/$name")
-    v.tabledata = fill(("Номер измерения" => 0, "САД реф." => 0, "ДАД реф." => 0), length(allmesfiles))
+    tabledata = fill(("Номер измерения" => 0, "САД реф." => 0, "ДАД реф." => 0), length(allmesfiles))
     for i in 1:lastindex(allmesfiles)
         bnds = try ReadRefMkp("$dir0/$basename/$name/$(allmesfiles[i])/bounds.csv")
                 catch e ReadRefMkp("$dir/$basename/$name/$(allmesfiles[i])/bounds.csv") end
-        v.tabledata[i] = ("Номер измерения" => i, "САД реф." => bnds.ad.desc.ibeg, "ДАД реф." => bnds.ad.desc.iend)
+        tabledata[i] = ("Номер измерения" => i, "САД реф." => bnds.ad.desc.ibeg, "ДАД реф." => bnds.ad.desc.iend)
     end
+
+    return tabledata
 end
 
 function MeasuresTable(v::Globals)   # Таблица с границами АД для всех измерений выбранного файла
     if !isempty(v.allfiles)
-        if isempty(v.tabledata) MakeTableData(v) end
+        if isempty(v.tabledata) v.tabledata = MakeTableData(v.fold, v.allfiles[v.fname])  end
         CImGui.NewLine()
         names = map(x -> x[1], v.tabledata[1])
         col = length(names)
@@ -344,9 +344,9 @@ function MeasuresTable(v::Globals)   # Таблица с границами АД
                 CImGui.PushID(i)
                 if CImGui.Selectable(string(j[2]), i == v.selecteditem, CImGui.ImGuiSelectableFlags_SpanAllColumns)
                     v.selecteditem = i 
-                    ReadData(v)
-                    GeneratePlotData(v)
-                    ChangePlotsID(v)
+                    v.markup, v.signal = ReadData(v.fold, v.allfiles[v.fname], v.selecteditem)
+                    v.plotbounds, v.dataforplotting, v.ECGmkp = GeneratePlotData(v.markup.bounds, v.signal, v.markup, v.ECGmkp)
+                    v.plotsid, v.dataforplotting = ReturnScale(v.plotsid, v.dataforplotting)
                 end
                 CImGui.PopID()
                 CImGui.NextColumn()
@@ -390,7 +390,7 @@ function isin(point::ImVec2, searchbox::NamedTuple{(:xmin, :xmax, :ymin, :ymax),
     return (point.x > searchbox.xmin && point.x < searchbox.xmax && point.y > searchbox.ymin && point.y < searchbox.ymax)
 end
 
-function InsideArea(v::Globals, whichplot)  # Действия с точками внутри выбранной прямоугольной зоны
+function InsideArea(v::Globals, whichplot::String)  # Действия с точками внутри выбранной прямоугольной зоны
     if !CImGui.IsMouseDown(0) && v.area.begpos != v.area.endpos
         if whichplot == "tone"
             allbegs = v.dataforplotting.Tone.ibegs
@@ -435,7 +435,7 @@ function InsideArea(v::Globals, whichplot)  # Действия с точками
     end
 end
 
-function MouseClick(v::Globals, whichplot)  # Ответ на определенные клики мышью по графику
+function MouseClick(v::Globals, whichplot::String)  # Ответ на определенные клики мышью по графику
     if ImPlot.IsPlotHovered()
         v.cursorpos = (ImPlot.GetPlotMousePos().x, true)
     end
@@ -686,35 +686,39 @@ function Info() # Справка
     end
 end
 
-function ChangePlotsID(v::Globals) # Изменение айдишников каждого графика (чтобы масштабы перестраивались только тогда, котогда нужно)
-    v.plotsid.ECG -= 2
-    v.plotsid.rawPres -= 1
-    v.plotsid.Pres += 1
-    v.plotsid.Tone += 2
+function ChangePlotsID(plotsid::PlotID) # Изменение айдишников каждого графика (чтобы масштабы перестраивались только тогда, котогда нужно)
+    plotsid.ECG -= 2
+    plotsid.rawPres -= 1
+    plotsid.Pres += 1
+    plotsid.Tone += 2
+
+    return plotsid
 end
 
-function ReturnScale(v::Globals)
-    ChangePlotsID(v)
+function ReturnScale(plotsid, dataforplotting)
+    plotsid = ChangePlotsID(plotsid)
 
-    ymin = v.dataforplotting.ECG.limits.Y.Min; ymin = ymin > 0 ? ymin*0.8 : ymin*1.1
-    ymax = v.dataforplotting.ECG.limits.Y.Max; ymax = ymax > 0 ? ymax*1.1 : ymax*0.8
-    xmin = v.dataforplotting.ECG.limits.X.Min; xmax = v.dataforplotting.ECG.limits.X.Max
-    v.dataforplotting.ECG.scale = PlotScale(xmin, xmax, ymin, ymax)
+    ymin = dataforplotting.ECG.limits.Y.Min; ymin = ymin > 0 ? ymin*0.8 : ymin*1.1
+    ymax = dataforplotting.ECG.limits.Y.Max; ymax = ymax > 0 ? ymax*1.1 : ymax*0.8
+    xmin = dataforplotting.ECG.limits.X.Min; xmax = dataforplotting.ECG.limits.X.Max
+    dataforplotting.ECG.scale = PlotScale(xmin, xmax, ymin, ymax)
 
-    ymin = v.dataforplotting.rawPres.limits.Y.Min; ymin = ymin > 0 ? ymin*0.8 : ymin*1.1
-    ymax = v.dataforplotting.rawPres.limits.Y.Max; ymax = ymax > 0 ? ymax*1.1 : ymax*0.8
-    xmin = v.dataforplotting.rawPres.limits.X.Min; xmax = v.dataforplotting.rawPres.limits.X.Max
-    v.dataforplotting.rawPres.scale = PlotScale(xmin, xmax, ymin, ymax)
+    ymax = dataforplotting.rawPres.limits.Y.Max; ymax = ymax > 0 ? ymax*1.1 : ymax*0.8
+    xmin = dataforplotting.rawPres.limits.X.Min; xmax = dataforplotting.rawPres.limits.X.Max
+    ymin = dataforplotting.rawPres.limits.Y.Min; ymin = ymin > 0 ? ymin*0.8 : ymin*1.1
+    dataforplotting.rawPres.scale = PlotScale(xmin, xmax, ymin, ymax)
 
-    ymin = v.dataforplotting.Pres.limits.Y.Min; ymin = ymin > 0 ? ymin*0.8 : ymin*1.1
-    ymax = v.dataforplotting.Pres.limits.Y.Max; ymax = ymax > 0 ? ymax*1.1 : ymax*0.8
-    xmin = v.dataforplotting.Pres.limits.X.Min; xmax = v.dataforplotting.Pres.limits.X.Max
-    v.dataforplotting.Pres.scale = PlotScale(xmin, xmax, ymin, ymax)
+    ymin = dataforplotting.Pres.limits.Y.Min; ymin = ymin > 0 ? ymin*0.8 : ymin*1.1
+    ymax = dataforplotting.Pres.limits.Y.Max; ymax = ymax > 0 ? ymax*1.1 : ymax*0.8
+    xmin = dataforplotting.Pres.limits.X.Min; xmax = dataforplotting.Pres.limits.X.Max
+    dataforplotting.Pres.scale = PlotScale(xmin, xmax, ymin, ymax)
 
-    ymin = v.dataforplotting.Tone.limits.Y.Min; ymin = ymin > 0 ? ymin*0.8 : ymin*1.1
-    ymax = v.dataforplotting.Tone.limits.Y.Max; ymax = ymax > 0 ? ymax*1.1 : ymax*0.8
-    xmin = v.dataforplotting.Tone.limits.X.Min; xmax = v.dataforplotting.Tone.limits.X.Max
-    v.dataforplotting.Tone.scale = PlotScale(xmin, xmax, ymin, ymax)
+    ymin = dataforplotting.Tone.limits.Y.Min; ymin = ymin > 0 ? ymin*0.8 : ymin*1.1
+    ymax = dataforplotting.Tone.limits.Y.Max; ymax = ymax > 0 ? ymax*1.1 : ymax*0.8
+    xmin = dataforplotting.Tone.limits.X.Min; xmax = dataforplotting.Tone.limits.X.Max
+    dataforplotting.Tone.scale = PlotScale(xmin, xmax, ymin, ymax)
+
+    return plotsid, dataforplotting
 end
 
 function FigureWindow(v::Globals) # Окно графиков с разметкой
@@ -726,7 +730,9 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
         BoundsFields(v)
         ChangeTypeCombo(v)
         CImGui.NewLine()
-        if CImGui.Button("Вернуть исходный масштаб") ReturnScale(v) end
+        if CImGui.Button("Вернуть исходный масштаб") 
+            v.plotsid, v.dataforplotting = ReturnScale(v.plotsid, v.dataforplotting) 
+        end
         SaveRefMarkupButton(v)
 
         # ImPlot.PushColormap(ImPlotColormap_Deep)
@@ -962,12 +968,13 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
     end
 end
 
-function ReadBase(v::Globals)
-    folder = v.fold
+function ReadBase(folder::String, ifile::Int, measure::Int)
     listoffiles = readdir(folder)
     allbins = map(x -> split(x,".")[end] == "bin" ? split(x,".")[1] : "", listoffiles)
-    v.allfiles = filter(x -> !isempty(x), allbins)
-    ReadData(v)
+    allfiles = filter(x -> !isempty(x), allbins)
+    markup, signal = ReadData(folder, allfiles[ifile], measure)
+
+    return allfiles, markup, signal
 end
 
 function BasesTable(v::Globals)
@@ -991,10 +998,10 @@ function BasesTable(v::Globals)
                 v.fname = 1
                 v.selecteditem = 1
                 v.fold = v.allbases[i]
-                ReadBase(v)
-                MakeTableData(v)
-                GeneratePlotData(v)
-                ChangePlotsID(v)
+                v.allfiles, v.markup, v.signal = ReadBase(v.fold, v.fname, v.selecteditem)
+                v.tabledata = MakeTableData(v.fold, v.allfiles[v.fname]) 
+                v.plotbounds, v.dataforplotting, v.ECGmkp = GeneratePlotData(v.markup.bounds, v.signal, v.markup, v.ECGmkp)
+                v.plotsid, v.dataforplotting = ReturnScale(v.plotsid, v.dataforplotting)
             end
             CImGui.PopID()
             CImGui.NextColumn()
@@ -1006,18 +1013,20 @@ function BasesTable(v::Globals)
     end
 end
 
-function LoadAllBases(v::Globals)
-    if !v.isguistarted
+function LoadAllBases(allbases, isguistarted::Bool)
+    if !isguistarted
         dir = "D:/INCART/Pulse_Data/все базы"
         dir0 = "formatted alg markup" # ищем базу в адаптированных под гуи, и если есть - сохраняем путь к исходникам базы (бинарям)
         allfolds = readdir(dir0)
-        v.allbases = map(x -> "$dir/$x", allfolds)
-        v.isguistarted = true
+        allbases = map(x -> "$dir/$x", allfolds)
+        isguistarted = true
     end
+
+    return allbases, isguistarted
 end
 
 function ui(v::Globals) # Главное окно программы (Окно меню + окно графиков с разметкой)
-    LoadAllBases(v)
+    v.allbases, v.isguistarted = LoadAllBases(v.allbases, v.isguistarted)
     MenuWindow(v)
     FigureWindow(v)
 end
