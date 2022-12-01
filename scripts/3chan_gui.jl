@@ -66,16 +66,16 @@ function GeneratePlotData(v::Globals)
     if sigtype == "tone"
         seg = v.signal.Tone[v.signal.validsegs[v.combo_item].ibeg:v.signal.validsegs[v.combo_item].iend]
 
-        smoothtone = my_butter(seg, 2, 60, v.signal.fs, "low") # сглаженный тонов
-        ftone = my_butter(smoothtone, 2, 30, v.signal.fs, "high") # фильтрованный тонов
-        sig = my_butter(abs.(ftone), 2, 10, v.signal.fs, "low") # огибающая по модулю
+        smoothtone = my_butter(seg, 2, 60, v.signal.fs, Lowpass) # сглаженный тонов
+        ftone = my_butter(smoothtone, 2, 30, v.signal.fs, Highpass) # фильтрованный тонов
+        sig = my_butter(abs.(ftone), 2, 10, v.signal.fs, Lowpass) # огибающая по модулю
 
         peaks = map(x -> x.pos-v.signal.validsegs[v.combo_item].ibeg+1, v.markup.Tone[v.combo_item])
     elseif sigtype == "pres"
         seg = v.signal.Pres[v.signal.validsegs[v.combo_item].ibeg:v.signal.validsegs[v.combo_item].iend]
 
-        fsig_smooth = my_butter(seg, 2, 10, v.signal.fs, "low") # сглаживание
-        sig = my_butter(fsig_smooth, 2, 0.3, v.signal.fs, "high") # устранение постоянной составляющей
+        fsig_smooth = my_butter(seg, 2, 10, v.signal.fs, Lowpass) # сглаживание
+        sig = my_butter(fsig_smooth, 2, 0.3, v.signal.fs, Highpass) # устранение постоянной составляющей
 
         peaks = map(x -> (begs = x.ibeg-v.signal.validsegs[v.combo_item].ibeg+1, 
                         ends = x.iend-v.signal.validsegs[v.combo_item].ibeg+1), v.markup.Pres[v.combo_item])

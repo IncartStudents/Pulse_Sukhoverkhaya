@@ -15,9 +15,9 @@ end
 # фильтры + детектор + параметризатор для Тонов
 function calc_tone(seg_tone, smoothpres, fs)
     # фильтры
-    smoothtone = my_butter(seg_tone, 2, 60, fs, "low") # сглаженный тонов
-    ftone = my_butter(smoothtone, 2, 30, fs, "high") # фильтрованный тонов
-    fstone = my_butter(abs.(ftone), 2, 10, fs, "low") # огибающая по модулю
+    smoothtone = my_butter(seg_tone, 2, 60, fs, Lowpass) # сглаженный тонов
+    ftone = my_butter(smoothtone, 2, 30, fs, Highpass) # фильтрованный тонов
+    fstone = my_butter(abs.(ftone), 2, 10, fs, Lowpass) # огибающая по модулю
     # детектор
     pos = pk_tone(fstone, fs)
     # параметризатор
@@ -83,10 +83,10 @@ function find_edges(x, pos, Fs)
     N = length(x)
     Np = length(pos)
     
-    Wmax = floor.(0.1*Fs) # макс полуширина, не более
-    noiseLen = floor.(0.080*Fs) # длина участка поиска уровня шума
-    noiseOffset1 = floor.(0.060*Fs) # fix(0.020*Fs); # отступ от границы ДО
-    noiseOffset2 = floor.(0.060*Fs) # fix(0.030*Fs); # отступ от границы ПОСЛЕ
+    Wmax = floor(Int, 0.1*Fs) # макс полуширина, не более
+    noiseLen = floor(Int, 0.080*Fs) # длина участка поиска уровня шума
+    noiseOffset1 = floor(Int, 0.060*Fs) # fix(0.020*Fs); # отступ от границы ДО
+    noiseOffset2 = floor(Int, 0.060*Fs) # fix(0.030*Fs); # отступ от границы ПОСЛЕ
 
     Acoef = 1/3
     val = x[pos]
@@ -99,8 +99,8 @@ function find_edges(x, pos, Fs)
     
         # поиск ширины
         wBefore = 0
-        ibeg = pos[i] |> Int64
-        iend = maximum([ibeg-Wmax, 1]) |> Int64
+        ibeg = pos[i]
+        iend = maximum([ibeg-Wmax, 1])
         for k in ibeg:-1:iend
             if x[k] < Lvl break end
             wBefore += 1
@@ -108,8 +108,8 @@ function find_edges(x, pos, Fs)
         i1 = ibeg-wBefore
         
         wAfter = 0
-        ibeg = pos[i] |> Int64
-        iend = minimum([pos[i]+Wmax, N]) |> Int64
+        ibeg = pos[i]
+        iend = minimum([pos[i]+Wmax, N])
         for k in ibeg : iend
             if x[k] < Lvl break end
             wAfter += 1
@@ -119,14 +119,14 @@ function find_edges(x, pos, Fs)
         W = wBefore + wAfter
         
         # поиск уровня шума
-        ibeg = maximum([1, pos[i]-wBefore-1-noiseOffset1]) |> Int64
-        iend = maximum([1, ibeg-noiseLen]) |> Int64
+        ibeg = maximum([1, pos[i]-wBefore-1-noiseOffset1])
+        iend = maximum([1, ibeg-noiseLen])
         nsBefore = maximum(x[iend:ibeg])
         ins1 = iend
         ins2 = ibeg
         
-        ibeg = minimum([N, pos[i]+wAfter+1+noiseOffset2]) |> Int64
-        iend = minimum([N, ibeg+noiseLen]) |> Int64
+        ibeg = minimum([N, pos[i]+wAfter+1+noiseOffset2])
+        iend = minimum([N, ibeg+noiseLen])
         nsAfter = maximum(x[ibeg:iend])
         ins3 = ibeg
         ins4 = iend
@@ -147,13 +147,12 @@ function discard_tone(smoothpres, fstone, pos, edg)
     bad = fill(0, length(pos))
     pres = smoothpres[pos]
 
-    badset = Tuple[]
+    badset = map(pres, edg, pos) do pres_i, edg_i, pos_i
+        s1 = pres_i < 30  # давление в точке меньше 30 мм
+        s2 = edg_i.snr < 3.0 # мин сигнал/шум
+        s3 = fstone[pos_i] < 30 # амплитуда тона (0.3 на исходный/1000)
 
-    for i in 1:lastindex(edg)
-        s1 = pres[i] < 30  # давление в точке меньше 30 мм
-        s2 = edg[i].snr < 3.0 # мин сигнал/шум
-        s3 = fstone[pos[i]] < 30 # амплитуда тона (0.3 на исходный/1000)
-        push!(badset, (s1, s2, s3))
+        (s1, s2, s3)
     end
 
     # браковка

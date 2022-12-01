@@ -1,9 +1,7 @@
 using DSP
 
-function my_butter(sig, order, freq, fs, type)
-    if type == "low" responsetype = Lowpass(freq; fs=fs)
-    elseif type == "high" responsetype = Highpass(freq; fs=fs)
-    end
+function my_butter(sig, order, freq, fs, Ftype::Type{<:FilterType})
+    responsetype = Ftype(freq; fs=fs)
     designmethod = Butterworth(order)
     fsig = filt(digitalfilter(responsetype, designmethod), sig)
 

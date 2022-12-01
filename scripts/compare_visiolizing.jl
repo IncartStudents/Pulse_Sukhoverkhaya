@@ -119,14 +119,14 @@ function figures_n_stats(allbins, sigtype)
             if sigtype == "tone"
                 seg = Tone[vseg[h].ibeg:vseg[h].iend]
 
-                smoothtone = my_butter(seg, 2, 60, fs, "low") # сглаженный тонов
-                ftone = my_butter(smoothtone, 2, 30, fs, "high") # фильтрованный тонов
-                fstone = my_butter(abs.(ftone), 2, 10, fs, "low") # огибающая по модулю
+                smoothtone = my_butter(seg, 2, 60, fs, Lowpass) # сглаженный тонов
+                ftone = my_butter(smoothtone, 2, 30, fs, Highpass) # фильтрованный тонов
+                fstone = my_butter(abs.(ftone), 2, 10, fs, Lowpass) # огибающая по модулю
             elseif sigtype == "pres"
                 seg = Pres[vseg[h].ibeg:vseg[h].iend]
 
-                fsig_smooth = my_butter(seg, 2, 10, fs, "low") # сглаживание
-                fstone = my_butter(fsig_smooth, 2, 0.3, fs, "high") # устранение постоянной составляющей
+                fsig_smooth = my_butter(seg, 2, 10, fs, Lowpass) # сглаживание
+                fstone = my_butter(fsig_smooth, 2, 0.3, fs, Highpass) # устранение постоянной составляющей
             end
 
             plot(fstone, label = "$sigtype")

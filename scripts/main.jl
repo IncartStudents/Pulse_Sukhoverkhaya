@@ -10,9 +10,9 @@ function refADcalc(tonemkp::Vector{ToneEv}, ad::Vector{AD}, Tone::Vector{Float64
     segm = Tone[seg[i].ibeg:seg[i].iend]
     pres = Pres[seg[i].ibeg:seg[i].iend]
 
-    smoothtone = my_butter(segm, 2, 60, fs, "low") # сглаженный тонов
-    ftone = my_butter(smoothtone, 2, 30, fs, "high") # фильтрованный тонов
-    segm = my_butter(abs.(ftone), 2, 10, fs, "low") # огибающая по модулю
+    smoothtone = my_butter(segm, 2, 60, fs, Lowpass) # сглаженный тонов
+    ftone = my_butter(smoothtone, 2, 30, fs, Highpass) # фильтрованный тонов
+    segm = my_butter(abs.(ftone), 2, 10, fs, Lowpass) # огибающая по модулю
 
     peaks = map(x -> (x.pos - seg[i].ibeg + 1), tonemkp)
     # peaks = map(x -> x.pos, tonemkp) # исп для теста с разметкой гуишного типа

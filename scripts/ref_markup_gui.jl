@@ -114,7 +114,7 @@ mutable struct Globals              # "Глобальные" переменны�
     allbases::Vector{String}        # Имена всех баз
     selectedbase::Int64             # Номер выбранной из таблицы базы
     isguistarted::Bool              # Флаг запуска гуи
-    cursorpos::Tuple{Float64, Bool}  # Текущая позиция курсора
+    cursorpos::Tuple{Float64, Bool} # Текущая позиция курсора
     ECGmkp::ECGmarkup               # Разметка ЭКГ
     movebound::String               # Индикатор, какая из 4-х вертикальных границ на графике захвачена для перемещения
 
@@ -163,11 +163,11 @@ function GeneratePlotData(bounds, signal, markup, ECGmkp)   # Генерация
     # ЭКГ (фильтр 0.1-45)
     ECG = signal.ECG[vseg.ibeg:vseg.iend]
     if length(unique(ECG)) > 1
-        ECG = my_butter(ECG, 4, 30, signal.fs, "low")
+        ECG = my_butter(ECG, 4, 30, signal.fs, Lowpass)
         # ECG = my_butter(ECG, 4, 5, v.signal.fs, "high")
         dx0 = 2*signal.fs
         P, _, _, _, _, R, _, _, T, _, _ = LeadMarkup(ECG[dx0:end], signal.fs)
-        ECG = my_butter(ECG, 4, 5, signal.fs, "high")
+        ECG = my_butter(ECG, 4, 5, signal.fs, Highpass)
         dx = dx0 - 4
         ECGmkp = ECGmarkup(P.+dx, R.+dx, T.+dx)
     end
@@ -175,18 +175,18 @@ function GeneratePlotData(bounds, signal, markup, ECGmkp)   # Генерация
     # тоны
     seg = signal.Tone[vseg.ibeg:vseg.iend]
 
-    tone_sig = my_butter(abs.(seg), 2, 10, signal.fs, "low")    # огибающая по модулю
+    tone_sig = my_butter(abs.(seg), 2, 10, signal.fs, Lowpass)    # огибающая по модулю
 
     tone_peaks = map(x -> x.pos, markup.Tone)
     
     # тоны от 60 Гц
-    fftone = my_butter(abs.(seg), 4, 60, signal.fs, "high")
+    fftone = my_butter(abs.(seg), 4, 60, signal.fs, Highpass)
 
     # пульсации (модуль)
     seg = signal.Pres[vseg.ibeg:vseg.iend]
 
-    fsig_smooth = my_butter(seg, 2, 10, signal.fs, "low")         # сглаживание
-    pres_sig = my_butter(fsig_smooth, 2, 0.3, signal.fs, "high")  # устранение постоянной составляющей
+    fsig_smooth = my_butter(seg, 2, 10, signal.fs, Lowpass)         # сглаживание
+    pres_sig = my_butter(fsig_smooth, 2, 0.3, signal.fs, Highpass)  # устранение постоянной составляющей
 
     pres_begs = map(x -> x.ibeg, markup.Pres)
     pres_ends = map(x -> x.iend, markup.Pres)
@@ -1015,7 +1015,7 @@ end
 
 function LoadAllBases(allbases, isguistarted::Bool)
     if !isguistarted
-        dir = "D:/INCART/Pulse_Data/все базы"
+        dir = "D:/INCART/Pulse_Data/all bases"
         dir0 = "formatted alg markup" # ищем базу в адаптированных под гуи, и если есть - сохраняем путь к исходникам базы (бинарям)
         allfolds = readdir(dir0)
         allbases = map(x -> "$dir/$x", allfolds)

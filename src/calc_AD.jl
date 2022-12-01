@@ -6,14 +6,9 @@ struct Peak
     max_pos::Int64
 end
 
-struct PDtk
+struct Detection
     minmax::Peak
     updown::Peak
-end
-
-struct Seg
-    bg::Int64
-    en::Int64
 end
 
 struct Params 
@@ -40,11 +35,11 @@ end
 function calc_ad(seg, fs)
 
     # Фильтрация
-    fsig_smooth = my_butter(seg, 2, 10, fs, "low") # сглаживание
-    fsig = my_butter(fsig_smooth, 2, 0.3, fs, "high") # устранение постоянной составляющей
+    fsig_smooth = my_butter(seg, 2, 10, fs, Lowpass) # сглаживание
+    fsig = my_butter(fsig_smooth, 2, 0.3, fs, Highpass) # устранение постоянной составляющей
 
     # детектор
-    pk = pkAD(fsig, fs)
+    pk = peakAD(fsig, fs)
 
     # параметризатор
     events = paramAD(pk, seg, fsig, fs)
@@ -72,7 +67,7 @@ function diff_filter(sig, fs)
 end
 
 # пиковый детектор с разрядами для АД
-function pkAD(filtered, fs)
+function peakAD(filtered, fs)
 
     # тахо
     tacho = diff_filter(filtered, fs);
@@ -105,7 +100,7 @@ function pkAD(filtered, fs)
 
     modeZero = true
 
-    detections = PDtk[]
+    detections = Detection[]
 
     # trend = fill(0.0, N)
     # level = fill(0.0, N)
@@ -159,7 +154,7 @@ function pkAD(filtered, fs)
                 minmax = Peak(mnPrevPos, i - mxCnt) # пик и детекция вверх тахо
                 updown = Peak(pkDn, pkUp)           # пики фильтрованного сигнала
 
-                push!(detections, PDtk(minmax, updown))
+                push!(detections, Detection(minmax, updown))
 
                 mnCntPrev = mnCnt
                 mnValPrev = mnVal
@@ -278,16 +273,6 @@ function discardAD(evt, fs)
             end
         end
     end
-
-    # begs = map((x,y) -> if y != 0 x.imn0 end, evt, bad)
-    # begs = begs[begs.!=nothing]
-
-    # ends = map((x,y) -> if y != 0 x.imn end, evt, bad)
-    # ends = ends[ends.!=nothing]
-
-    # seg = map((x,y) -> Seg(x,y), begs, ends)
-
-    # new_events = map((x,y,z) -> (tfront = x, duty = y, kW = z), tfront, duty, kW)
 
     return bad
 end
