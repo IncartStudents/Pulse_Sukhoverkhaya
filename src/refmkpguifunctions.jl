@@ -63,7 +63,7 @@ function SaveRefMarkup(filename::String, Presseg::Vector{Float64}, segbounds::Bo
 
     open(filename, "w") do io
         write(io, "       segmbegpos   segmendpos   iSAD   ADamp   iDAD   DADamp   iWRh   WRh   iWRl   WRl")
-        write(io, "\npump   $ibeg   $iend   $idadpump   $Adadpump   $isadpump   $Asadpump   $iwendpump   $Awendpump   $iwbegpump   $Awbegpump")
+        write(io, "\npump   $ibeg   $iend   $isadpump   $Asadpump   $idadpump   $Adadpump   $iwendpump   $Awendpump   $iwbegpump   $Awbegpump")
         write(io, "\ndesc   $ibeg   $iend   $isaddesc   $Asaddesc   $idaddesc   $Adaddesc   $iwbegdesc   $Awbegdesc   $iwenddesc   $Awenddesc")
     end
 

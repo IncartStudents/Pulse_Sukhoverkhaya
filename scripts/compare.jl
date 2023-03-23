@@ -3,8 +3,7 @@ include("../src/beat2beat.jl")
 include("../src/help_func.jl")   # добавление файла со вспомогательными функциями 
 include("../src/readfiles.jl") 
 
-
-dir = "D:/INCART/Pulse_Data/bin"
+dir = "D:/INCART/Pulse_Data/all bases/KT 07 AD ECG"
 files = readdir(dir)
 allbins = files[findall(x -> split(x, ".")[end] == "bin", files)]
 

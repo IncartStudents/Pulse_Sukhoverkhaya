@@ -16,8 +16,10 @@ include("../src/help_func.jl")
 include("../src/readfiles.jl") 
 include("../src/my_filt.jl")  
 include("../src/refmkpguifunctions.jl") 
-include("../ECG markup/onelead.jl")
+# include("../ECG markup/onelead.jl")
+include("D:/INCART/PulseDetectorVer1/prototype/findR.jl")
 
+# include(joinpath(pathof(CImGui), "..", "..", "demo", "demo.jl"))
 
 # include(joinpath(pathof(ImPlot), "..", "..", "demo", "implot_demo.jl"))
 # show_demo()
@@ -115,7 +117,7 @@ mutable struct Globals              # "Глобальные" переменны�
     selectedbase::Int64             # Номер выбранной из таблицы базы
     isguistarted::Bool              # Флаг запуска гуи
     cursorpos::Tuple{Float64, Bool} # Текущая позиция курсора
-    ECGmkp::ECGmarkup               # Разметка ЭКГ
+    ECGmkp::Vector{Int}             # Разметка ЭКГ
     movebound::String               # Индикатор, какая из 4-х вертикальных границ на графике захвачена для перемещения
 
     function Globals()
@@ -140,7 +142,7 @@ mutable struct Globals              # "Глобальные" переменны�
         selectedbase = 0
         isguistarted = false
         cursorpos = (0.0, false)
-        ECGmkp = ECGmarkup(Int64[], Int64[], Int64[])
+        ECGmkp = Int[]
         movebound = ""
 
         new(signal, markup, plotbounds, dataforplotting, 
@@ -163,13 +165,9 @@ function GeneratePlotData(bounds, signal, markup, ECGmkp)   # Генерация
     # ЭКГ (фильтр 0.1-45)
     ECG = signal.ECG[vseg.ibeg:vseg.iend]
     if length(unique(ECG)) > 1
-        ECG = my_butter(ECG, 4, 30, signal.fs, Lowpass)
-        # ECG = my_butter(ECG, 4, 5, v.signal.fs, "high")
-        dx0 = 2*signal.fs
-        P, _, _, _, _, R, _, _, T, _, _ = LeadMarkup(ECG[dx0:end], signal.fs)
-        ECG = my_butter(ECG, 4, 5, signal.fs, Highpass)
-        dx = dx0 - 4
-        ECGmkp = ECGmarkup(P.+dx, R.+dx, T.+dx)
+        rs = Rmkp(ECG, signal.fs, filt = true)
+        ECGmkp = map(x -> x.ipeak, rs)
+        ECG = my_butter(ECG, 2, (5, 35), signal.fs, Bandpass)
     end
 
     # тоны
@@ -259,7 +257,7 @@ function SaveRefMarkupButton(v::Globals) # Кнопка сохранения и�
 
             pres_markup = map((x,y,z) -> PresGuiMkp(x, y, z), v.dataforplotting.Pres.ibegs, v.dataforplotting.Pres.iends, v.dataforplotting.Pres.type)
             tone_markup = map((x,y) -> ToneGuiMkp(x, y), v.dataforplotting.Tone.ibegs, v.dataforplotting.Tone.type)
-            ad = (pump = Bounds(v.plotbounds.AD.pump.iend, v.plotbounds.AD.pump.ibeg), desc = v.plotbounds.AD.desc)
+            ad = (pump = v.plotbounds.AD.pump, desc = v.plotbounds.AD.desc)
             wz = (pump = Bounds(v.plotbounds.workreg.pump.iend, v.plotbounds.workreg.pump.ibeg), desc = v.plotbounds.workreg.desc)
             segbounds = v.plotbounds.segbounds
 
@@ -770,7 +768,7 @@ function FigureWindow(v::Globals) # Окно графиков с разметк�
 
                     color = ImVec4(1,0,0,1)
                     # P = filter(x -> x <= length(sig), v.ECGmkp.P)
-                    R = filter(x -> x <= length(sig), v.ECGmkp.R)
+                    R = filter(x -> x <= length(sig), v.ECGmkp)
                     # T = filter(x -> x <= length(sig), v.ECGmkp.T)
 
                     # Scatter(7, P, sig[P], ImPlotMarker_Circle, 5, "P")
