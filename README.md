@@ -1,1 +1,2 @@
-# Pulse_Sukhoverkhaya
+Запуск алгоритма разметки - mai.jl
+Гуи для формирования референтной разметки - ref_markup_gui.jl
